@@ -40,7 +40,7 @@ function Screen() {
   }
 
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
       <InstallBanner />
       <Routes>
         <Route path="/" element={<HomePage />} />

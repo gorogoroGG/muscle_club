@@ -451,26 +451,31 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     [notificationRecipientIds, currentUserId],
   )
 
+  const redirectUrl = `${window.location.origin}${import.meta.env.BASE_URL}`
+
   const signInWithApple = useCallback(async () => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'apple',
-      options: { redirectTo: window.location.origin },
+      options: { redirectTo: redirectUrl },
     })
     if (error) setLastErrorMessage(error.message)
-  }, [])
+  }, [redirectUrl])
 
-  const sendMagicLink = useCallback(async (email: string) => {
-    const trimmed = email.trim()
-    if (!trimmed) return { error: 'メールアドレスを入力してください。' }
-    const { error } = await supabase.auth.signInWithOtp({
-      email: trimmed,
-      options: {
-        emailRedirectTo: window.location.origin,
-        shouldCreateUser: true,
-      },
-    })
-    return { error: error?.message ?? null }
-  }, [])
+  const sendMagicLink = useCallback(
+    async (email: string) => {
+      const trimmed = email.trim()
+      if (!trimmed) return { error: 'メールアドレスを入力してください。' }
+      const { error } = await supabase.auth.signInWithOtp({
+        email: trimmed,
+        options: {
+          emailRedirectTo: redirectUrl,
+          shouldCreateUser: true,
+        },
+      })
+      return { error: error?.message ?? null }
+    },
+    [redirectUrl],
+  )
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut()
