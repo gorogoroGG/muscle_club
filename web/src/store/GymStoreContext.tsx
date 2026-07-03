@@ -39,6 +39,71 @@ function defaultInitials(name: string): string {
   return prefix.padEnd(2, 'M')
 }
 
+// Dev-only demo mode (?demo=1): renders the signed-in screens with local mock
+// data and no Supabase traffic, so UI work doesn't require claiming a real
+// member. Dead-code-eliminated from production builds via import.meta.env.DEV.
+const DEMO_MODE = import.meta.env.DEV && new URLSearchParams(window.location.search).has('demo')
+const DEMO_AUTH_ID = 'demo-auth'
+
+function demoData() {
+  const now = new Date()
+  const at = (daysAgo: number, hour: number, minute = 0) => {
+    const d = new Date(now)
+    d.setDate(d.getDate() - daysAgo)
+    d.setHours(hour, minute, 0, 0)
+    return d.toISOString()
+  }
+  const members: Member[] = [
+    { id: 'm-yugo', name: 'ゆーご', initials: 'YG', avatar_color: 'teal', claimed_by: DEMO_AUTH_ID },
+    { id: 'm-manase', name: 'まなせ', initials: 'MN', avatar_color: 'pink', claimed_by: 'other-1' },
+    { id: 'm-icchi', name: 'いっちー', initials: 'IC', avatar_color: 'green', claimed_by: 'other-2' },
+    { id: 'm-ukasu', name: 'うーかす', initials: 'UK', avatar_color: 'orange', claimed_by: 'other-3' },
+  ]
+  const gymVisits: GymVisit[] = [
+    { id: 'v-open', member_id: 'm-manase', check_in_at: at(0, Math.max(0, now.getHours() - 1)), check_out_at: null },
+    { id: 'v-done', member_id: 'm-ukasu', check_in_at: at(0, 7), check_out_at: at(0, 8, 30) },
+    ...[1, 2, 4, 6, 9, 12, 16, 20].map((d, i) => ({
+      id: `vh-${i}`,
+      member_id: 'm-yugo',
+      check_in_at: at(d, 19),
+      check_out_at: at(d, 20, 15),
+    })),
+    ...[1, 3, 5].map((d, i) => ({
+      id: `vm-${i}`,
+      member_id: 'm-manase',
+      check_in_at: at(d, 18),
+      check_out_at: at(d, 19),
+    })),
+  ]
+  const attendanceRecords: AttendanceRecord[] = [
+    { id: 'a-1', member_id: 'm-yugo', date: now.toISOString(), type: 'going' },
+    { id: 'a-2', member_id: 'm-icchi', date: now.toISOString(), type: 'going' },
+  ]
+  const notifications: AppNotification[] = [
+    {
+      id: 'n-1',
+      recipient_member_id: 'm-yugo',
+      actor_member_id: 'm-manase',
+      type: 'checkedIn',
+      title: 'チェックインがありました',
+      message: 'まなせ さんがジムに到着しました。',
+      created_at: at(0, Math.max(0, now.getHours() - 1)),
+      read_at: null,
+    },
+    {
+      id: 'n-2',
+      recipient_member_id: 'm-yugo',
+      actor_member_id: 'm-icchi',
+      type: 'going',
+      title: '参加予定が更新されました',
+      message: 'いっちー さんが「参加」を選びました。',
+      created_at: at(0, 9),
+      read_at: null,
+    },
+  ]
+  return { members, gymVisits, attendanceRecords, notifications }
+}
+
 interface GymStoreValue {
   appMode: AppMode
   session: Session | null
@@ -88,7 +153,7 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
   const [lastErrorMessage, setLastErrorMessage] = useState<string | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
 
-  const authUserId = session?.user.id ?? null
+  const authUserId = DEMO_MODE ? DEMO_AUTH_ID : (session?.user.id ?? null)
 
   const currentUser = useMemo<Member | null>(() => {
     if (!authUserId) return null
@@ -102,6 +167,16 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
   // Bootstrap: reuse an existing session, or silently create an anonymous one.
   // No email is ever sent for this, so there's no OTP rate limit to hit.
   useEffect(() => {
+    if (DEMO_MODE) {
+      const seed = demoData()
+      setMembers(seed.members)
+      setGymVisits(seed.gymVisits)
+      setAttendanceRecords(seed.attendanceRecords)
+      setNotifications(seed.notifications)
+      setAppMode('signedIn')
+      return
+    }
+
     if (!isSupabaseConfigured) {
       setLastErrorMessage('Supabase の設定がまだ入っていません。')
       setAppMode('failed')
@@ -396,6 +471,7 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
 
   const createNotifications = useCallback(
     async (type: AppNotificationType, title: string, message: string) => {
+      if (DEMO_MODE) return
       const recipients = notificationRecipientIds()
       if (recipients.length === 0 || !currentUserId) return
       const payload: AppNotification[] = recipients.map((recipientId) => ({
@@ -457,7 +533,7 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     const existing = attendanceRecords.filter(
       (r) => r.member_id === currentUserId && isDateInToday(new Date(r.date)),
     )
-    if (existing.length > 0) {
+    if (!DEMO_MODE && existing.length > 0) {
       await supabase.from('attendance_records').delete().in('id', existing.map((r) => r.id))
     }
     if (isCurrentUserGoing) {
@@ -470,10 +546,12 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
       date: new Date().toISOString(),
       type: 'going',
     }
-    const { error } = await supabase.from('attendance_records').insert(record)
-    if (error) {
-      setLastErrorMessage(error.message)
-      return
+    if (!DEMO_MODE) {
+      const { error } = await supabase.from('attendance_records').insert(record)
+      if (error) {
+        setLastErrorMessage(error.message)
+        return
+      }
     }
     setAttendanceRecords((prev) => [...prev.filter((r) => !existing.some((e) => e.id === r.id)), record])
     const name = currentUser?.name ?? '誰か'
@@ -489,7 +567,7 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     const existing = attendanceRecords.filter(
       (r) => r.member_id === currentUserId && isDateInToday(new Date(r.date)),
     )
-    if (existing.length > 0) {
+    if (!DEMO_MODE && existing.length > 0) {
       await supabase.from('attendance_records').delete().in('id', existing.map((r) => r.id))
     }
     if (isCurrentUserNotGoing) {
@@ -502,10 +580,12 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
       date: new Date().toISOString(),
       type: 'notGoing',
     }
-    const { error } = await supabase.from('attendance_records').insert(record)
-    if (error) {
-      setLastErrorMessage(error.message)
-      return
+    if (!DEMO_MODE) {
+      const { error } = await supabase.from('attendance_records').insert(record)
+      if (error) {
+        setLastErrorMessage(error.message)
+        return
+      }
     }
     setAttendanceRecords((prev) => [...prev.filter((r) => !existing.some((e) => e.id === r.id)), record])
     const name = currentUser?.name ?? '誰か'
@@ -520,10 +600,12 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
       check_in_at: new Date().toISOString(),
       check_out_at: null,
     }
-    const { error } = await supabase.from('gym_visits').insert(visit)
-    if (error) {
-      setLastErrorMessage(error.message)
-      return
+    if (!DEMO_MODE) {
+      const { error } = await supabase.from('gym_visits').insert(visit)
+      if (error) {
+        setLastErrorMessage(error.message)
+        return
+      }
     }
     setGymVisits((prev) => [...prev, visit])
     const name = currentUser?.name ?? '誰か'
@@ -535,10 +617,12 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     const visit = openVisitFor(currentUserId)
     if (!visit) return
     const checkOutAt = new Date().toISOString()
-    const { error } = await supabase.from('gym_visits').update({ check_out_at: checkOutAt }).eq('id', visit.id)
-    if (error) {
-      setLastErrorMessage(error.message)
-      return
+    if (!DEMO_MODE) {
+      const { error } = await supabase.from('gym_visits').update({ check_out_at: checkOutAt }).eq('id', visit.id)
+      if (error) {
+        setLastErrorMessage(error.message)
+        return
+      }
     }
     setGymVisits((prev) => prev.map((v) => (v.id === visit.id ? { ...v, check_out_at: checkOutAt } : v)))
     const name = currentUser?.name ?? '誰か'
@@ -549,10 +633,12 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     if (!currentUserId) return
     const visit = openVisitFor(currentUserId)
     if (!visit) return
-    const { error } = await supabase.from('gym_visits').delete().eq('id', visit.id)
-    if (error) {
-      setLastErrorMessage(error.message)
-      return
+    if (!DEMO_MODE) {
+      const { error } = await supabase.from('gym_visits').delete().eq('id', visit.id)
+      if (error) {
+        setLastErrorMessage(error.message)
+        return
+      }
     }
     setGymVisits((prev) => prev.filter((v) => v.id !== visit.id))
     const name = currentUser?.name ?? '誰か'
@@ -563,10 +649,12 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     const unreadIds = notifications.filter((n) => n.read_at === null).map((n) => n.id)
     if (unreadIds.length === 0) return
     const readAt = new Date().toISOString()
-    const { error } = await supabase.from('notifications').update({ read_at: readAt }).in('id', unreadIds)
-    if (error) {
-      setLastErrorMessage(error.message)
-      return
+    if (!DEMO_MODE) {
+      const { error } = await supabase.from('notifications').update({ read_at: readAt }).in('id', unreadIds)
+      if (error) {
+        setLastErrorMessage(error.message)
+        return
+      }
     }
     setNotifications((prev) => prev.map((n) => (unreadIds.includes(n.id) ? { ...n, read_at: readAt } : n)))
   }, [notifications])
@@ -576,13 +664,15 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
       if (!currentUserId) return
       const trimmed = name.trim()
       if (!trimmed) return
-      const { error } = await supabase
-        .from('members')
-        .update({ name: trimmed, initials: defaultInitials(trimmed) })
-        .eq('id', currentUserId)
-      if (error) {
-        setLastErrorMessage(error.message)
-        return
+      if (!DEMO_MODE) {
+        const { error } = await supabase
+          .from('members')
+          .update({ name: trimmed, initials: defaultInitials(trimmed) })
+          .eq('id', currentUserId)
+        if (error) {
+          setLastErrorMessage(error.message)
+          return
+        }
       }
       setMembers((prev) =>
         prev.map((m) => (m.id === currentUserId ? { ...m, name: trimmed, initials: defaultInitials(trimmed) } : m)),

@@ -4,6 +4,7 @@ import { Card } from '../components/Card'
 import { Avatar } from '../components/Avatar'
 import { NotificationsSheet } from '../components/NotificationsSheet'
 import { formatMinutes } from '../lib/date'
+import type { Member } from '../types'
 
 export function HomePage() {
   const store = useGymStore()
@@ -88,41 +89,31 @@ export function HomePage() {
 
       <Card title="TODAY">
         <h3 className="section-heading">今日の様子</h3>
-        {store.todayCheckedInMembers.length === 0 &&
-        store.todayCheckedOutMembers.length === 0 &&
-        store.todayGoingNotArrivedMembers.length === 0 ? (
-          <p className="muted">今日はまだ参加予定の人がいません。</p>
-        ) : (
-          <>
-            <div className="member-chip-row">
-              {store.todayCheckedInMembers.map((member) => (
-                <div key={member.id} className="member-chip">
-                  <Avatar member={member} size={40} />
-                  <span>{member.name}</span>
-                </div>
-              ))}
-            </div>
-            {store.todayCheckedOutMembers.length > 0 && (
-              <div className="checked-out-cluster">
-                {store.todayCheckedOutMembers.map((member) => (
-                  <Avatar key={member.id} member={member} size={32} />
-                ))}
-                <span>チェックアウト済み</span>
-              </div>
-            )}
-            {store.todayGoingNotArrivedMembers.length > 0 && (
-              <div className="member-chip-row">
-                <span className="muted small">まだ到着していません</span>
-                {store.todayGoingNotArrivedMembers.map((member) => (
-                  <div key={member.id} className="member-chip">
-                    <Avatar member={member} size={40} />
-                    <span>{member.name}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
-        )}
+        <div className="status-flow">
+          <StatusStage
+            tone="going"
+            icon="🏃"
+            label="予定"
+            members={store.todayGoingNotArrivedMembers}
+            emptyText="まだ誰も予定していません"
+          />
+          <div className="status-flow-arrow">↓</div>
+          <StatusStage
+            tone="checkedin"
+            icon="✅"
+            label="ジムにいる"
+            members={store.todayCheckedInMembers}
+            emptyText="今チェックイン中の人はいません"
+          />
+          <div className="status-flow-arrow">↓</div>
+          <StatusStage
+            tone="checkedout"
+            icon="🚪"
+            label="チェックアウト済み"
+            members={store.todayCheckedOutMembers}
+            emptyText="まだ誰も退出していません"
+          />
+        </div>
       </Card>
 
       <Card title="SUMMARY">
@@ -164,6 +155,42 @@ export function HomePage() {
             </button>
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+function StatusStage({
+  tone,
+  icon,
+  label,
+  members,
+  emptyText,
+}: {
+  tone: 'going' | 'checkedin' | 'checkedout'
+  icon: string
+  label: string
+  members: Member[]
+  emptyText: string
+}) {
+  const isActive = members.length > 0
+  return (
+    <div className={`status-stage tone-${tone}${isActive ? ' is-active' : ''}`}>
+      <div className="status-stage-header">
+        <span className="status-stage-icon">{icon}</span>
+        <span>{label}</span>
+      </div>
+      {isActive ? (
+        <div className="status-stage-chips">
+          {members.map((member) => (
+            <div key={member.id} className="member-chip">
+              <Avatar member={member} size={40} />
+              <span>{member.name}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="status-stage-empty">{emptyText}</p>
       )}
     </div>
   )

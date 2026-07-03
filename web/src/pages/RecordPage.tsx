@@ -34,6 +34,7 @@ export function RecordPage() {
       </header>
 
       <div className="segmented-control">
+        <div className={`segmented-thumb${period === 'month' ? ' right' : ''}`} />
         <button className={period === 'week' ? 'active' : ''} onClick={() => setPeriod('week')}>
           週間
         </button>
@@ -53,12 +54,15 @@ export function RecordPage() {
             <div className="stat-value accent">{totalCount}回</div>
           </div>
         </div>
-        <div className="bar-chart">
-          {stats.map((stat) => (
+        <div className="bar-chart" key={period}>
+          {stats.map((stat, index) => (
             <div key={stat.label} className="bar-chart-column">
               <div
                 className="bar-chart-bar"
-                style={{ height: `${Math.max(4, (stat.minutes / maxMinutes) * 100)}%` }}
+                style={{
+                  height: `${Math.max(4, (stat.minutes / maxMinutes) * 100)}%`,
+                  animationDelay: `${index * 45}ms`,
+                }}
               />
               <span className="bar-chart-label">{stat.label}</span>
             </div>
@@ -71,7 +75,7 @@ export function RecordPage() {
         {!hasComparisonData ? (
           <p className="muted">まだ記録がありません。</p>
         ) : (
-          <div className="comparison-list">
+          <div className="comparison-list" key={period}>
             {comparison.map((item, index) => (
               <div key={item.member.id} className="comparison-row">
                 <span className={`rank${index < 3 ? ' top' : ''}`}>{index + 1}</span>
