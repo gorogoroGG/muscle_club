@@ -74,7 +74,7 @@ export function MyPage() {
       <header>
         <div className="eyebrow">PROFILE</div>
         <h1>{store.currentUser.name}</h1>
-        <p className="muted">Apple ID でログイン中</p>
+        <p className="muted">この端末に紐づいています</p>
       </header>
 
       <Card title="ACCOUNT">
@@ -118,13 +118,11 @@ export function MyPage() {
         {pushMessage && <div className="message-block accent">{pushMessage}</div>}
       </Card>
 
-      <Card title="SESSION">
-        <h3 className="section-heading">アカウント</h3>
-        {store.lastErrorMessage && <div className="message-block danger">{store.lastErrorMessage}</div>}
-        <button className="secondary-button danger" onClick={() => store.signOut()}>
-          ログアウト
-        </button>
-      </Card>
+      {store.lastErrorMessage && (
+        <Card title="ERROR">
+          <div className="message-block danger">{store.lastErrorMessage}</div>
+        </Card>
+      )}
     </div>
   )
 }

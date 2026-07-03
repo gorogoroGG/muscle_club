@@ -26,7 +26,6 @@ import type {
   AppNotification,
   AppNotificationType,
   AttendanceRecord,
-  AvatarColor,
   GymVisit,
   Member,
   MemberComparisonEntry,
@@ -34,41 +33,17 @@ import type {
   TodayGymStatus,
 } from '../types'
 
-const AVATAR_COLORS: AvatarColor[] = [
-  'blue',
-  'indigo',
-  'pink',
-  'green',
-  'orange',
-  'teal',
-  'purple',
-  'red',
-  'yellow',
-]
-
-function hashString(value: string): number {
-  let hash = 0
-  for (let i = 0; i < value.length; i++) {
-    hash = (hash << 5) - hash + value.charCodeAt(i)
-    hash |= 0
-  }
-  return Math.abs(hash)
-}
-
 function defaultInitials(name: string): string {
   const normalized = name.toUpperCase().replace(/[^A-Z0-9]/g, '')
   const prefix = normalized.slice(0, 2)
   return prefix.padEnd(2, 'M')
 }
 
-function defaultAvatarColor(name: string): AvatarColor {
-  return AVATAR_COLORS[hashString(name) % AVATAR_COLORS.length]
-}
-
 interface GymStoreValue {
   appMode: AppMode
   session: Session | null
   members: Member[]
+  unclaimedMembers: Member[]
   attendanceRecords: AttendanceRecord[]
   gymVisits: GymVisit[]
   notifications: AppNotification[]
@@ -89,8 +64,8 @@ interface GymStoreValue {
   monthlyStats: (monthsBack?: number, memberId?: string) => PeriodStat[]
   memberComparisonForWeek: (date?: Date) => MemberComparisonEntry[]
   memberComparisonForMonth: (date?: Date) => MemberComparisonEntry[]
-  sendMagicLink: (email: string) => Promise<{ error: string | null }>
-  signOut: () => Promise<void>
+  claimMember: (memberId: string) => Promise<{ error: string | null }>
+  resetIdentity: () => Promise<void>
   toggleGoing: () => Promise<void>
   toggleNotGoing: () => Promise<void>
   checkIn: () => Promise<void>
@@ -113,66 +88,19 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
   const [lastErrorMessage, setLastErrorMessage] = useState<string | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
 
-  const currentUserId = session?.user.id ?? null
+  const authUserId = session?.user.id ?? null
 
   const currentUser = useMemo<Member | null>(() => {
-    if (!currentUserId) return null
-    return members.find((m) => m.id === currentUserId) ?? null
-  }, [members, currentUserId])
+    if (!authUserId) return null
+    return members.find((m) => m.claimed_by === authUserId) ?? null
+  }, [members, authUserId])
 
-  const ensureCurrentMemberExists = useCallback(async (activeSession: Session) => {
-    const userId = activeSession.user.id
-    const { data: existing, error: fetchError } = await supabase
-      .from('members')
-      .select('*')
-      .eq('id', userId)
-      .maybeSingle()
+  const currentUserId = currentUser?.id ?? null
 
-    if (fetchError) throw fetchError
-    if (existing) return existing as Member
+  const unclaimedMembers = useMemo(() => members.filter((m) => m.claimed_by === null), [members])
 
-    const displayName =
-      (activeSession.user.user_metadata?.full_name as string | undefined) ||
-      (activeSession.user.user_metadata?.name as string | undefined) ||
-      activeSession.user.email?.split('@')[0] ||
-      'member'
-
-    const seed: Member = {
-      id: userId,
-      name: displayName,
-      initials: defaultInitials(displayName),
-      avatar_color: defaultAvatarColor(displayName),
-    }
-
-    const { error: insertError } = await supabase.from('members').upsert(seed)
-    if (insertError) throw insertError
-    return seed
-  }, [])
-
-  const loadRemoteData = useCallback(async (userId: string) => {
-    const [membersRes, attendanceRes, visitsRes, notificationsRes] = await Promise.all([
-      supabase.from('members').select('*'),
-      supabase.from('attendance_records').select('*'),
-      supabase.from('gym_visits').select('*'),
-      supabase
-        .from('notifications')
-        .select('*')
-        .eq('recipient_member_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(100),
-    ])
-
-    if (membersRes.error) throw membersRes.error
-    if (attendanceRes.error) throw attendanceRes.error
-    if (visitsRes.error) throw visitsRes.error
-    if (notificationsRes.error) throw notificationsRes.error
-
-    setMembers(membersRes.data as Member[])
-    setAttendanceRecords(attendanceRes.data as AttendanceRecord[])
-    setGymVisits(visitsRes.data as GymVisit[])
-    setNotifications(notificationsRes.data as AppNotification[])
-  }, [])
-
+  // Bootstrap: reuse an existing session, or silently create an anonymous one.
+  // No email is ever sent for this, so there's no OTP rate limit to hit.
   useEffect(() => {
     if (!isSupabaseConfigured) {
       setLastErrorMessage('Supabase の設定がまだ入っていません。')
@@ -182,21 +110,27 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
 
     let cancelled = false
 
-    supabase.auth.getSession().then(({ data }) => {
+    async function bootstrap() {
+      const { data } = await supabase.auth.getSession()
       if (cancelled) return
-      setSession(data.session)
-      if (!data.session) setAppMode('signedOut')
-    })
+      if (data.session) {
+        setSession(data.session)
+        return
+      }
+      const { data: anon, error } = await supabase.auth.signInAnonymously()
+      if (cancelled) return
+      if (error) {
+        setLastErrorMessage(error.message)
+        setAppMode('failed')
+        return
+      }
+      setSession(anon.session)
+    }
+
+    bootstrap()
 
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession)
-      if (!nextSession) {
-        setMembers([])
-        setAttendanceRecords([])
-        setGymVisits([])
-        setNotifications([])
-        setAppMode('signedOut')
-      }
     })
 
     return () => {
@@ -207,17 +141,47 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!session) return
+    const activeSession = session
     let cancelled = false
 
     async function run() {
       setAppMode('loading')
       try {
-        await ensureCurrentMemberExists(session!)
-        await loadRemoteData(session!.user.id)
-        if (!cancelled) {
+        const { data: memberRows, error: membersError } = await supabase.from('members').select('*')
+        if (membersError) throw membersError
+        if (cancelled) return
+        setMembers(memberRows as Member[])
+
+        const claimed = (memberRows as Member[]).find((m) => m.claimed_by === activeSession.user.id)
+        if (!claimed) {
+          setAttendanceRecords([])
+          setGymVisits([])
+          setNotifications([])
           setLastErrorMessage(null)
-          setAppMode('signedIn')
+          setAppMode('claiming')
+          return
         }
+
+        const [attendanceRes, visitsRes, notificationsRes] = await Promise.all([
+          supabase.from('attendance_records').select('*'),
+          supabase.from('gym_visits').select('*'),
+          supabase
+            .from('notifications')
+            .select('*')
+            .eq('recipient_member_id', claimed.id)
+            .order('created_at', { ascending: false })
+            .limit(100),
+        ])
+        if (attendanceRes.error) throw attendanceRes.error
+        if (visitsRes.error) throw visitsRes.error
+        if (notificationsRes.error) throw notificationsRes.error
+        if (cancelled) return
+
+        setAttendanceRecords(attendanceRes.data as AttendanceRecord[])
+        setGymVisits(visitsRes.data as GymVisit[])
+        setNotifications(notificationsRes.data as AppNotification[])
+        setLastErrorMessage(null)
+        setAppMode('signedIn')
       } catch (error) {
         if (!cancelled) {
           setLastErrorMessage(error instanceof Error ? error.message : String(error))
@@ -230,18 +194,18 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [session, ensureCurrentMemberExists, loadRemoteData, reloadToken])
+  }, [session, reloadToken])
+
+  const reload = useCallback(() => setReloadToken((t) => t + 1), [])
 
   // refresh when the installed PWA comes back to the foreground (e.g. after a push notification)
   useEffect(() => {
     function handleVisibility() {
-      if (document.visibilityState === 'visible' && session) {
-        loadRemoteData(session.user.id).catch(() => undefined)
-      }
+      if (document.visibilityState === 'visible' && session) reload()
     }
     document.addEventListener('visibilitychange', handleVisibility)
     return () => document.removeEventListener('visibilitychange', handleVisibility)
-  }, [session, loadRemoteData])
+  }, [session, reload])
 
   const openVisitFor = useCallback(
     (memberId: string) => gymVisits.find((v) => v.member_id === memberId && v.check_out_at === null),
@@ -450,27 +414,42 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     [notificationRecipientIds, currentUserId],
   )
 
-  const redirectUrl = `${window.location.origin}${import.meta.env.BASE_URL}`
-
-  const sendMagicLink = useCallback(
-    async (email: string) => {
-      const trimmed = email.trim()
-      if (!trimmed) return { error: 'メールアドレスを入力してください。' }
-      const { error } = await supabase.auth.signInWithOtp({
-        email: trimmed,
-        options: {
-          emailRedirectTo: redirectUrl,
-          shouldCreateUser: true,
-        },
-      })
-      return { error: error?.message ?? null }
+  const claimMember = useCallback(
+    async (memberId: string) => {
+      if (!session) return { error: 'セッションがありません。少し待ってからもう一度試してください。' }
+      const { data, error } = await supabase
+        .from('members')
+        .update({ claimed_by: session.user.id })
+        .eq('id', memberId)
+        .is('claimed_by', null)
+        .select()
+        .maybeSingle()
+      if (error) return { error: error.message }
+      if (!data) return { error: 'その名前はすでに使われています。一覧を更新してみてください。' }
+      reload()
+      return { error: null }
     },
-    [redirectUrl],
+    [session, reload],
   )
 
-  const signOut = useCallback(async () => {
+  // Discards the current (anonymous) identity and starts a fresh one. This is
+  // only useful as a recovery path from the failed screen -- it does not
+  // "log out" of a claimed member, since claiming is meant to be permanent
+  // per device.
+  const resetIdentity = useCallback(async () => {
     await supabase.auth.signOut()
-    setAppMode('signedOut')
+    setMembers([])
+    setAttendanceRecords([])
+    setGymVisits([])
+    setNotifications([])
+    setAppMode('loading')
+    const { data, error } = await supabase.auth.signInAnonymously()
+    if (error) {
+      setLastErrorMessage(error.message)
+      setAppMode('failed')
+      return
+    }
+    setSession(data.session)
   }, [])
 
   const toggleGoing = useCallback(async () => {
@@ -612,12 +591,11 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     [currentUserId],
   )
 
-  const reload = useCallback(() => setReloadToken((t) => t + 1), [])
-
   const value: GymStoreValue = {
     appMode,
     session,
     members,
+    unclaimedMembers,
     attendanceRecords,
     gymVisits,
     notifications,
@@ -638,8 +616,8 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     monthlyStats,
     memberComparisonForWeek,
     memberComparisonForMonth,
-    sendMagicLink,
-    signOut,
+    claimMember,
+    resetIdentity,
     toggleGoing,
     toggleNotGoing,
     checkIn,

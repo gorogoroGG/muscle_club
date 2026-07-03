@@ -1,6 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { GymStoreProvider, useGymStore } from './store/GymStoreContext'
-import { AuthPage } from './pages/AuthPage'
+import { ClaimMemberPage } from './pages/ClaimMemberPage'
 import { HomePage } from './pages/HomePage'
 import { RecordPage } from './pages/RecordPage'
 import { MyPage } from './pages/MyPage'
@@ -20,8 +20,8 @@ function Screen() {
     )
   }
 
-  if (store.appMode === 'signedOut') {
-    return <AuthPage />
+  if (store.appMode === 'claiming') {
+    return <ClaimMemberPage />
   }
 
   if (store.appMode === 'failed') {
@@ -32,8 +32,8 @@ function Screen() {
         <button className="primary-button" onClick={store.reload}>
           もう一度読み込む
         </button>
-        <button className="secondary-button danger" onClick={store.signOut}>
-          ログアウトする
+        <button className="secondary-button danger" onClick={store.resetIdentity}>
+          リセットする
         </button>
       </div>
     )

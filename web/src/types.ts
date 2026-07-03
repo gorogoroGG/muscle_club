@@ -26,6 +26,7 @@ export interface Member {
   name: string
   initials: string
   avatar_color: AvatarColor
+  claimed_by: string | null
 }
 
 export type AttendanceType = 'going' | 'notGoing'
@@ -77,4 +78,4 @@ export interface MemberComparisonEntry {
   minutes: number
 }
 
-export type AppMode = 'loading' | 'signedOut' | 'signedIn' | 'failed'
+export type AppMode = 'loading' | 'claiming' | 'signedIn' | 'failed'

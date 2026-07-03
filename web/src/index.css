@@ -348,29 +348,28 @@ h1 {
   color: var(--text-secondary);
   margin: 0;
 }
-.magic-link-form {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.magic-link-form input {
-  padding: 14px;
-  border-radius: 14px;
-  border: 1px solid var(--stroke);
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text-primary);
-}
-
-.benefit-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
+.member-picker-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  color: var(--text-secondary);
-  font-size: 14px;
 }
+.member-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--stroke);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 600;
+  text-align: left;
+}
+.member-picker-row:disabled {
+  opacity: 0.5;
+}
+
 .message-block {
   padding: 12px;
   border-radius: 14px;
