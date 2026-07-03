@@ -32,31 +32,6 @@ export function AuthPage() {
       </div>
 
       <section className="card">
-        <div className="card-title">APPLE SIGN IN</div>
-        <h2 className="auth-card-title">Apple ID でログイン</h2>
-        <p className="auth-card-body">
-          ログインすると、自分の記録を安全に管理しつつ、登録メンバー全員と予定とチェックインを共有できます。
-        </p>
-
-        <button
-          className="apple-signin-button"
-          disabled={!isSupabaseConfigured}
-          onClick={() => store.signInWithApple()}
-        >
-           Apple でサインイン
-        </button>
-
-        {store.lastErrorMessage && <div className="message-block danger">{store.lastErrorMessage}</div>}
-        {!isSupabaseConfigured && (
-          <div className="message-block warning">
-            Supabase の URL / ANON KEY を設定すると Apple ID ログインを開始できます。
-          </div>
-        )}
-      </section>
-
-      <div className="auth-divider">または</div>
-
-      <section className="card">
         <div className="card-title">EMAIL SIGN IN</div>
         <h2 className="auth-card-title">メールアドレスでログイン</h2>
         <p className="auth-card-body">
@@ -79,6 +54,12 @@ export function AuthPage() {
 
         {magicLinkMessage && <div className="message-block accent">{magicLinkMessage}</div>}
         {magicLinkError && <div className="message-block danger">{magicLinkError}</div>}
+        {store.lastErrorMessage && <div className="message-block danger">{store.lastErrorMessage}</div>}
+        {!isSupabaseConfigured && (
+          <div className="message-block warning">
+            Supabase の URL / ANON KEY を設定するとログインを開始できます。
+          </div>
+        )}
       </section>
 
       <ul className="benefit-list">

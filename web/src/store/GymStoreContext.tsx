@@ -89,7 +89,6 @@ interface GymStoreValue {
   monthlyStats: (monthsBack?: number, memberId?: string) => PeriodStat[]
   memberComparisonForWeek: (date?: Date) => MemberComparisonEntry[]
   memberComparisonForMonth: (date?: Date) => MemberComparisonEntry[]
-  signInWithApple: () => Promise<void>
   sendMagicLink: (email: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
   toggleGoing: () => Promise<void>
@@ -453,14 +452,6 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
 
   const redirectUrl = `${window.location.origin}${import.meta.env.BASE_URL}`
 
-  const signInWithApple = useCallback(async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'apple',
-      options: { redirectTo: redirectUrl },
-    })
-    if (error) setLastErrorMessage(error.message)
-  }, [redirectUrl])
-
   const sendMagicLink = useCallback(
     async (email: string) => {
       const trimmed = email.trim()
@@ -647,7 +638,6 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     monthlyStats,
     memberComparisonForWeek,
     memberComparisonForMonth,
-    signInWithApple,
     sendMagicLink,
     signOut,
     toggleGoing,

@@ -348,12 +348,6 @@ h1 {
   color: var(--text-secondary);
   margin: 0;
 }
-.auth-divider {
-  text-align: center;
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
 .magic-link-form {
   display: flex;
   flex-direction: column;
@@ -367,15 +361,6 @@ h1 {
   color: var(--text-primary);
 }
 
-.apple-signin-button {
-  height: 54px;
-  border-radius: 16px;
-  border: none;
-  background: white;
-  color: black;
-  font-weight: 700;
-  font-size: 16px;
-}
 .benefit-list {
   list-style: none;
   padding: 0;

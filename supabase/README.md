@@ -8,14 +8,14 @@
 2. Supabase の SQL Editor で `schema.sql` を実行する。
 3. `2026-07-01_notifications_and_attendance.sql` を実行する。
 4. `2026-07-03_pwa_migration.sql` を実行する(チャット廃止 / push_subscriptions テーブル追加)。
-5. Supabase の Auth 設定で Apple Provider を有効にする。
-   - ネイティブアプリ: Bundle ID ベースの設定で問題ありません。
-   - PWA(Web): 別途 Apple Developer で **Services ID** を作成し、Supabase Auth の
-     Apple プロバイダ設定に Services ID / Redirect URL を追加する必要があります
-     (ネイティブと共有できないので個別対応が必要です)。
+5. Supabase の Auth 設定で Apple Provider を有効にする(ネイティブアプリのみで使用。
+   Bundle ID ベースの設定で問題ありません)。
 6. iOS 側で `Sign in with Apple` capability を有効にする(ネイティブアプリのみ)。
 
 ## PWA(`web/`)を動かす
+
+PWA版はメールアドレスのマジックリンクログインのみです(Apple Sign Inは使いません。
+Web用のApple Services ID設定は不要です)。
 
 1. `web/.env.local` に `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` / `VITE_VAPID_PUBLIC_KEY` を設定する。
 2. `cd web && npm install && npm run dev`
