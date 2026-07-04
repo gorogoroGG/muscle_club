@@ -1,14 +1,15 @@
-import { useEffect } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { useGymStore } from '../store/GymStoreContext'
 import { formatDateTime } from '../lib/date'
+import { IconCheck, IconDumbbell, IconLogOut, IconMoon, IconXCircle } from './Icons'
 import type { AppNotificationType } from '../types'
 
-const ICONS: Record<AppNotificationType, string> = {
-  going: '🏃',
-  notGoing: '🙅',
-  checkedIn: '✅',
-  checkedOut: '🚪',
-  checkInCancelled: '❌',
+const META: Record<AppNotificationType, { icon: ReactNode; tone: string }> = {
+  going: { icon: <IconDumbbell size={18} />, tone: 'tone-pink' },
+  notGoing: { icon: <IconMoon size={18} />, tone: 'tone-blue' },
+  checkedIn: { icon: <IconCheck size={18} />, tone: 'tone-green' },
+  checkedOut: { icon: <IconLogOut size={18} />, tone: 'tone-orange' },
+  checkInCancelled: { icon: <IconXCircle size={18} />, tone: 'tone-red' },
 }
 
 export function NotificationsSheet({ onClose }: { onClose: () => void }) {
@@ -37,7 +38,9 @@ export function NotificationsSheet({ onClose }: { onClose: () => void }) {
           ) : (
             store.notifications.map((notification) => (
               <div key={notification.id} className="notification-row">
-                <div className="notification-icon">{ICONS[notification.type]}</div>
+                <div className={`notification-icon ${META[notification.type].tone}`}>
+                  {META[notification.type].icon}
+                </div>
                 <div className="notification-body">
                   <div className="notification-title">{notification.title}</div>
                   <div className="notification-message">{notification.message}</div>

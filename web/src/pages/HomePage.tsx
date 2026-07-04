@@ -1,8 +1,18 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useGymStore } from '../store/GymStoreContext'
 import { Card } from '../components/Card'
 import { Avatar } from '../components/Avatar'
 import { NotificationsSheet } from '../components/NotificationsSheet'
+import {
+  IconBell,
+  IconCalendar,
+  IconCheck,
+  IconDumbbell,
+  IconLogOut,
+  IconMapPin,
+  IconMoon,
+  IconUndo,
+} from '../components/Icons'
 import { formatMinutes } from '../lib/date'
 import type { Member } from '../types'
 
@@ -22,7 +32,7 @@ export function HomePage() {
         <div className="home-header-row">
           <h1>今日のジム</h1>
           <button className="bell-button" onClick={() => setShowNotifications(true)} aria-label="通知">
-            🔔
+            <IconBell size={20} />
             {store.unreadNotificationCount > 0 && (
               <span className="badge-dot">{Math.min(store.unreadNotificationCount, 9)}</span>
             )}
@@ -38,7 +48,9 @@ export function HomePage() {
               disabled={store.isCurrentUserCheckedIn}
               onClick={() => store.toggleGoing()}
             >
-              <span className="intent-icon">🏃</span>
+              <span className="intent-icon">
+                <IconDumbbell size={28} />
+              </span>
               <span>参加</span>
             </button>
           )}
@@ -48,7 +60,9 @@ export function HomePage() {
               disabled={store.isCurrentUserCheckedIn}
               onClick={() => store.toggleNotGoing()}
             >
-              <span className="intent-icon">🙅</span>
+              <span className="intent-icon">
+                <IconMoon size={28} />
+              </span>
               <span>不参加</span>
             </button>
           )}
@@ -60,7 +74,7 @@ export function HomePage() {
           {status === 'checkedIn' ? (
             <>
               <button className="status-circle checked-in" onClick={() => setShowCancelConfirm(true)}>
-                ✅
+                <IconCheck size={52} strokeWidth={2.5} />
               </button>
               <p className="status-label">チェックイン済み</p>
               <button className="primary-button" onClick={() => store.checkOut()}>
@@ -72,12 +86,16 @@ export function HomePage() {
             </>
           ) : status === 'checkedOut' ? (
             <>
-              <div className="status-circle checked-out">↩️</div>
+              <div className="status-circle checked-out">
+                <IconUndo size={44} />
+              </div>
               <p className="status-label">チェックアウト済み</p>
             </>
           ) : (
             <>
-              <div className="status-circle idle">📍</div>
+              <div className="status-circle idle">
+                <IconMapPin size={40} />
+              </div>
               <p className="status-label">未チェックイン</p>
               <button className="primary-button" onClick={() => store.checkIn()}>
                 チェックインする
@@ -92,7 +110,7 @@ export function HomePage() {
         <div className="status-flow">
           <StatusStage
             tone="going"
-            icon="🏃"
+            icon={<IconCalendar size={14} />}
             label="予定"
             members={store.todayGoingNotArrivedMembers}
             emptyText="まだ誰も予定していません"
@@ -100,7 +118,7 @@ export function HomePage() {
           <div className="status-flow-arrow">↓</div>
           <StatusStage
             tone="checkedin"
-            icon="✅"
+            icon={<IconDumbbell size={14} />}
             label="ジムにいる"
             members={store.todayCheckedInMembers}
             emptyText="今チェックイン中の人はいません"
@@ -108,7 +126,7 @@ export function HomePage() {
           <div className="status-flow-arrow">↓</div>
           <StatusStage
             tone="checkedout"
-            icon="🚪"
+            icon={<IconLogOut size={14} />}
             label="チェックアウト済み"
             members={store.todayCheckedOutMembers}
             emptyText="まだ誰も退出していません"
@@ -168,7 +186,7 @@ function StatusStage({
   emptyText,
 }: {
   tone: 'going' | 'checkedin' | 'checkedout'
-  icon: string
+  icon: ReactNode
   label: string
   members: Member[]
   emptyText: string

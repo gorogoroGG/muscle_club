@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useGymStore } from '../store/GymStoreContext'
 import { Avatar } from '../components/Avatar'
+import { IconDumbbell } from '../components/Icons'
 import type { Member } from '../types'
 
 export function ClaimMemberPage() {
@@ -26,7 +27,9 @@ export function ClaimMemberPage() {
   return (
     <div className="auth-page">
       <div className="auth-hero">
-        <div className="auth-hero-icon">💪</div>
+        <div className="auth-hero-icon">
+          <IconDumbbell size={46} />
+        </div>
         <h1>筋肉クラブ</h1>
         <p>あなたの名前をタップしてください。この端末に紐づきます。</p>
       </div>

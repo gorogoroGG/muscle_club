@@ -5,6 +5,7 @@ import { Avatar } from '../components/Avatar'
 import { getExistingPushSubscription, isPushSupported, subscribeToPush, unsubscribeFromPush } from '../push/push'
 import { supabase } from '../lib/supabaseClient'
 import { resizeToSquareJpeg } from '../lib/image'
+import { IconCamera } from '../components/Icons'
 
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined
 
@@ -108,7 +109,7 @@ export function MyPage() {
             aria-label="アイコンを変更"
           >
             <Avatar member={store.currentUser} size={84} />
-            <span className="avatar-edit-badge">{avatarBusy ? '…' : '📷'}</span>
+            <span className="avatar-edit-badge">{avatarBusy ? '…' : <IconCamera size={15} />}</span>
           </button>
           <input
             ref={fileInputRef}
