@@ -26,6 +26,7 @@ export interface Member {
   name: string
   initials: string
   avatar_color: AvatarColor
+  avatar_url: string | null
   claimed_by: string | null
 }
 

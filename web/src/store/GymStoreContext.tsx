@@ -54,10 +54,10 @@ function demoData() {
     return d.toISOString()
   }
   const members: Member[] = [
-    { id: 'm-yugo', name: 'ゆーご', initials: 'YG', avatar_color: 'teal', claimed_by: DEMO_AUTH_ID },
-    { id: 'm-manase', name: 'まなせ', initials: 'MN', avatar_color: 'pink', claimed_by: 'other-1' },
-    { id: 'm-icchi', name: 'いっちー', initials: 'IC', avatar_color: 'green', claimed_by: 'other-2' },
-    { id: 'm-ukasu', name: 'うーかす', initials: 'UK', avatar_color: 'orange', claimed_by: 'other-3' },
+    { id: 'm-yugo', name: 'ゆーご', initials: 'YG', avatar_color: 'teal', avatar_url: null, claimed_by: DEMO_AUTH_ID },
+    { id: 'm-manase', name: 'まなせ', initials: 'MN', avatar_color: 'pink', avatar_url: null, claimed_by: 'other-1' },
+    { id: 'm-icchi', name: 'いっちー', initials: 'IC', avatar_color: 'green', avatar_url: null, claimed_by: 'other-2' },
+    { id: 'm-ukasu', name: 'うーかす', initials: 'UK', avatar_color: 'orange', avatar_url: null, claimed_by: 'other-3' },
   ]
   const gymVisits: GymVisit[] = [
     { id: 'v-open', member_id: 'm-manase', check_in_at: at(0, Math.max(0, now.getHours() - 1)), check_out_at: null },
@@ -138,6 +138,7 @@ interface GymStoreValue {
   cancelCheckIn: () => Promise<void>
   markNotificationsRead: () => Promise<void>
   updateProfile: (name: string) => Promise<void>
+  updateAvatar: (image: Blob) => Promise<{ error: string | null }>
   reload: () => void
 }
 
@@ -528,32 +529,44 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     setSession(data.session)
   }, [])
 
+  // All write actions below update local state first so taps feel instant,
+  // then sync to Supabase in the background and roll back on failure.
   const toggleGoing = useCallback(async () => {
     if (!currentUserId || isCurrentUserCheckedIn) return
     const existing = attendanceRecords.filter(
       (r) => r.member_id === currentUserId && isDateInToday(new Date(r.date)),
     )
-    if (!DEMO_MODE && existing.length > 0) {
-      await supabase.from('attendance_records').delete().in('id', existing.map((r) => r.id))
-    }
+    const removedIds = new Set(existing.map((r) => r.id))
+
     if (isCurrentUserGoing) {
-      setAttendanceRecords((prev) => prev.filter((r) => !existing.some((e) => e.id === r.id)))
+      setAttendanceRecords((prev) => prev.filter((r) => !removedIds.has(r.id)))
+      if (!DEMO_MODE && existing.length > 0) {
+        const { error } = await supabase.from('attendance_records').delete().in('id', [...removedIds])
+        if (error) {
+          setAttendanceRecords((prev) => [...prev, ...existing])
+          setLastErrorMessage(error.message)
+        }
+      }
       return
     }
+
     const record: AttendanceRecord = {
       id: crypto.randomUUID(),
       member_id: currentUserId,
       date: new Date().toISOString(),
       type: 'going',
     }
-    if (!DEMO_MODE) {
-      const { error } = await supabase.from('attendance_records').insert(record)
-      if (error) {
-        setLastErrorMessage(error.message)
-        return
-      }
+    setAttendanceRecords((prev) => [...prev.filter((r) => !removedIds.has(r.id)), record])
+    if (DEMO_MODE) return
+    if (existing.length > 0) {
+      await supabase.from('attendance_records').delete().in('id', [...removedIds])
     }
-    setAttendanceRecords((prev) => [...prev.filter((r) => !existing.some((e) => e.id === r.id)), record])
+    const { error } = await supabase.from('attendance_records').insert(record)
+    if (error) {
+      setAttendanceRecords((prev) => [...prev.filter((r) => r.id !== record.id), ...existing])
+      setLastErrorMessage(error.message)
+      return
+    }
     const name = currentUser?.name ?? '誰か'
     await createNotifications('going', '参加予定が更新されました', `${name} さんが「参加」を選びました。`)
   }, [currentUserId, isCurrentUserCheckedIn, isCurrentUserGoing, attendanceRecords, currentUser, createNotifications])
@@ -567,27 +580,37 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     const existing = attendanceRecords.filter(
       (r) => r.member_id === currentUserId && isDateInToday(new Date(r.date)),
     )
-    if (!DEMO_MODE && existing.length > 0) {
-      await supabase.from('attendance_records').delete().in('id', existing.map((r) => r.id))
-    }
+    const removedIds = new Set(existing.map((r) => r.id))
+
     if (isCurrentUserNotGoing) {
-      setAttendanceRecords((prev) => prev.filter((r) => !existing.some((e) => e.id === r.id)))
+      setAttendanceRecords((prev) => prev.filter((r) => !removedIds.has(r.id)))
+      if (!DEMO_MODE && existing.length > 0) {
+        const { error } = await supabase.from('attendance_records').delete().in('id', [...removedIds])
+        if (error) {
+          setAttendanceRecords((prev) => [...prev, ...existing])
+          setLastErrorMessage(error.message)
+        }
+      }
       return
     }
+
     const record: AttendanceRecord = {
       id: crypto.randomUUID(),
       member_id: currentUserId,
       date: new Date().toISOString(),
       type: 'notGoing',
     }
-    if (!DEMO_MODE) {
-      const { error } = await supabase.from('attendance_records').insert(record)
-      if (error) {
-        setLastErrorMessage(error.message)
-        return
-      }
+    setAttendanceRecords((prev) => [...prev.filter((r) => !removedIds.has(r.id)), record])
+    if (DEMO_MODE) return
+    if (existing.length > 0) {
+      await supabase.from('attendance_records').delete().in('id', [...removedIds])
     }
-    setAttendanceRecords((prev) => [...prev.filter((r) => !existing.some((e) => e.id === r.id)), record])
+    const { error } = await supabase.from('attendance_records').insert(record)
+    if (error) {
+      setAttendanceRecords((prev) => [...prev.filter((r) => r.id !== record.id), ...existing])
+      setLastErrorMessage(error.message)
+      return
+    }
     const name = currentUser?.name ?? '誰か'
     await createNotifications('notGoing', '参加予定が更新されました', `${name} さんが「不参加」を選びました。`)
   }, [currentUserId, isCurrentUserCheckedIn, isCurrentUserNotGoing, attendanceRecords, currentUser, createNotifications])
@@ -600,14 +623,14 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
       check_in_at: new Date().toISOString(),
       check_out_at: null,
     }
-    if (!DEMO_MODE) {
-      const { error } = await supabase.from('gym_visits').insert(visit)
-      if (error) {
-        setLastErrorMessage(error.message)
-        return
-      }
-    }
     setGymVisits((prev) => [...prev, visit])
+    if (DEMO_MODE) return
+    const { error } = await supabase.from('gym_visits').insert(visit)
+    if (error) {
+      setGymVisits((prev) => prev.filter((v) => v.id !== visit.id))
+      setLastErrorMessage(error.message)
+      return
+    }
     const name = currentUser?.name ?? '誰か'
     await createNotifications('checkedIn', 'チェックインがありました', `${name} さんがジムに到着しました。`)
   }, [currentUserId, isCurrentUserCheckedIn, currentUser, createNotifications])
@@ -617,14 +640,14 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     const visit = openVisitFor(currentUserId)
     if (!visit) return
     const checkOutAt = new Date().toISOString()
-    if (!DEMO_MODE) {
-      const { error } = await supabase.from('gym_visits').update({ check_out_at: checkOutAt }).eq('id', visit.id)
-      if (error) {
-        setLastErrorMessage(error.message)
-        return
-      }
-    }
     setGymVisits((prev) => prev.map((v) => (v.id === visit.id ? { ...v, check_out_at: checkOutAt } : v)))
+    if (DEMO_MODE) return
+    const { error } = await supabase.from('gym_visits').update({ check_out_at: checkOutAt }).eq('id', visit.id)
+    if (error) {
+      setGymVisits((prev) => prev.map((v) => (v.id === visit.id ? { ...v, check_out_at: null } : v)))
+      setLastErrorMessage(error.message)
+      return
+    }
     const name = currentUser?.name ?? '誰か'
     await createNotifications('checkedOut', 'チェックアウトがありました', `${name} さんがジムを退出しました。`)
   }, [currentUserId, openVisitFor, currentUser, createNotifications])
@@ -633,30 +656,30 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     if (!currentUserId) return
     const visit = openVisitFor(currentUserId)
     if (!visit) return
-    if (!DEMO_MODE) {
-      const { error } = await supabase.from('gym_visits').delete().eq('id', visit.id)
-      if (error) {
-        setLastErrorMessage(error.message)
-        return
-      }
-    }
     setGymVisits((prev) => prev.filter((v) => v.id !== visit.id))
+    if (DEMO_MODE) return
+    const { error } = await supabase.from('gym_visits').delete().eq('id', visit.id)
+    if (error) {
+      setGymVisits((prev) => [...prev, visit])
+      setLastErrorMessage(error.message)
+      return
+    }
     const name = currentUser?.name ?? '誰か'
     await createNotifications('checkInCancelled', 'チェックインが取り消されました', `${name} さんがチェックインを取り消しました。`)
   }, [currentUserId, openVisitFor, currentUser, createNotifications])
 
   const markNotificationsRead = useCallback(async () => {
-    const unreadIds = notifications.filter((n) => n.read_at === null).map((n) => n.id)
-    if (unreadIds.length === 0) return
+    const unread = notifications.filter((n) => n.read_at === null)
+    if (unread.length === 0) return
+    const unreadIds = new Set(unread.map((n) => n.id))
     const readAt = new Date().toISOString()
-    if (!DEMO_MODE) {
-      const { error } = await supabase.from('notifications').update({ read_at: readAt }).in('id', unreadIds)
-      if (error) {
-        setLastErrorMessage(error.message)
-        return
-      }
+    setNotifications((prev) => prev.map((n) => (unreadIds.has(n.id) ? { ...n, read_at: readAt } : n)))
+    if (DEMO_MODE) return
+    const { error } = await supabase.from('notifications').update({ read_at: readAt }).in('id', [...unreadIds])
+    if (error) {
+      setNotifications((prev) => prev.map((n) => (unreadIds.has(n.id) ? { ...n, read_at: null } : n)))
+      setLastErrorMessage(error.message)
     }
-    setNotifications((prev) => prev.map((n) => (unreadIds.includes(n.id) ? { ...n, read_at: readAt } : n)))
   }, [notifications])
 
   const updateProfile = useCallback(
@@ -677,6 +700,36 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
       setMembers((prev) =>
         prev.map((m) => (m.id === currentUserId ? { ...m, name: trimmed, initials: defaultInitials(trimmed) } : m)),
       )
+    },
+    [currentUserId],
+  )
+
+  const updateAvatar = useCallback(
+    async (image: Blob): Promise<{ error: string | null }> => {
+      if (!currentUserId) return { error: 'メンバー情報が見つかりません。' }
+
+      if (DEMO_MODE) {
+        const url = URL.createObjectURL(image)
+        setMembers((prev) => prev.map((m) => (m.id === currentUserId ? { ...m, avatar_url: url } : m)))
+        return { error: null }
+      }
+
+      const path = `${currentUserId}.jpg`
+      const { error: uploadError } = await supabase.storage.from('avatars').upload(path, image, {
+        upsert: true,
+        contentType: 'image/jpeg',
+        cacheControl: '3600',
+      })
+      if (uploadError) return { error: uploadError.message }
+
+      const { data } = supabase.storage.from('avatars').getPublicUrl(path)
+      // cache-busting query so everyone's browser picks up the new image
+      const url = `${data.publicUrl}?v=${Date.now()}`
+      const { error } = await supabase.from('members').update({ avatar_url: url }).eq('id', currentUserId)
+      if (error) return { error: error.message }
+
+      setMembers((prev) => prev.map((m) => (m.id === currentUserId ? { ...m, avatar_url: url } : m)))
+      return { error: null }
     },
     [currentUserId],
   )
@@ -715,6 +768,7 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     cancelCheckIn,
     markNotificationsRead,
     updateProfile,
+    updateAvatar,
     reload,
   }
 

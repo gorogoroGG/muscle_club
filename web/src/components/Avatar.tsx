@@ -14,7 +14,7 @@ export function Avatar({ member, size = 40 }: { member: Member; size?: number })
         border: `1.5px solid ${color}66`,
       }}
     >
-      {member.initials}
+      {member.avatar_url ? <img src={member.avatar_url} alt={member.name} loading="lazy" /> : member.initials}
     </div>
   )
 }

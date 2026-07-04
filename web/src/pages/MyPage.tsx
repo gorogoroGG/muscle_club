@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useGymStore } from '../store/GymStoreContext'
 import { Card } from '../components/Card'
 import { Avatar } from '../components/Avatar'
 import { getExistingPushSubscription, isPushSupported, subscribeToPush, unsubscribeFromPush } from '../push/push'
 import { supabase } from '../lib/supabaseClient'
+import { resizeToSquareJpeg } from '../lib/image'
 
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined
 
@@ -13,6 +14,9 @@ export function MyPage() {
   const [pushEnabled, setPushEnabled] = useState(false)
   const [pushBusy, setPushBusy] = useState(false)
   const [pushMessage, setPushMessage] = useState<string | null>(null)
+  const [avatarBusy, setAvatarBusy] = useState(false)
+  const [avatarMessage, setAvatarMessage] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     setName(store.currentUser?.name ?? '')
@@ -67,6 +71,23 @@ export function MyPage() {
     }
   }
 
+  async function handleAvatarSelected(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setAvatarBusy(true)
+    setAvatarMessage(null)
+    try {
+      const image = await resizeToSquareJpeg(file, 256)
+      const { error } = await store.updateAvatar(image)
+      setAvatarMessage(error ?? 'アイコンを変更しました。')
+    } catch {
+      setAvatarMessage('画像を読み込めませんでした。別の写真で試してください。')
+    } finally {
+      setAvatarBusy(false)
+    }
+  }
+
   if (!store.currentUser) return null
 
   return (
@@ -79,7 +100,25 @@ export function MyPage() {
 
       <Card title="ACCOUNT">
         <div className="profile-hero">
-          <Avatar member={store.currentUser} size={74} />
+          <button
+            type="button"
+            className="avatar-edit-button"
+            disabled={avatarBusy}
+            onClick={() => fileInputRef.current?.click()}
+            aria-label="アイコンを変更"
+          >
+            <Avatar member={store.currentUser} size={84} />
+            <span className="avatar-edit-badge">{avatarBusy ? '…' : '📷'}</span>
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={handleAvatarSelected}
+          />
+          <p className="muted small">アイコンをタップして写真を変更</p>
+          {avatarMessage && <div className="message-block accent">{avatarMessage}</div>}
           <form
             className="profile-form"
             onSubmit={(e) => {

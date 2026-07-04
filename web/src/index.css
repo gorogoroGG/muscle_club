@@ -65,6 +65,11 @@ button {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
+  touch-action: manipulation;
+}
+
+a {
+  touch-action: manipulation;
 }
 
 input {
@@ -472,6 +477,43 @@ button.status-circle:active {
   justify-content: center;
   font-weight: 700;
   flex-shrink: 0;
+  overflow: hidden;
+}
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.avatar-edit-button {
+  position: relative;
+  background: none;
+  border: none;
+  padding: 0;
+  transition: transform 0.12s var(--ease-spring);
+}
+.avatar-edit-button:active {
+  transform: scale(0.94);
+}
+.avatar-edit-button:disabled {
+  opacity: 0.6;
+}
+.avatar-edit-badge {
+  position: absolute;
+  bottom: -2px;
+  right: -4px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--surface-strong);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
 /* Summary metrics */
