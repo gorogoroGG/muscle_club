@@ -128,6 +128,16 @@ struct SupabaseGymService {
         )
     }
 
+    func reopenGymVisit(id: UUID) async throws {
+        _ = try await execute(
+            path: "gym_visits",
+            method: "PATCH",
+            queryItems: [URLQueryItem(name: "id", value: "eq.\(id.uuidString)")],
+            body: GymVisitCheckOutResetRow(),
+            prefer: "return=minimal"
+        )
+    }
+
     func deleteGymVisit(id: UUID) async throws {
         _ = try await request(
             path: "gym_visits",
@@ -427,6 +437,17 @@ private struct GymVisitCheckOutUpdateRow: Codable {
     let checkOutAt: Date
 
     enum CodingKeys: String, CodingKey {
+        case checkOutAt = "check_out_at"
+    }
+}
+
+private struct GymVisitCheckOutResetRow: Encodable {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeNil(forKey: .checkOutAt)
+    }
+
+    private enum CodingKeys: String, CodingKey {
         case checkOutAt = "check_out_at"
     }
 }

@@ -556,15 +556,17 @@ final class GymStore: ObservableObject {
             !$0.isOpen
         }) else { return }
 
-        let visit = gymVisits.remove(at: visitIndex)
+        let visit = gymVisits[visitIndex]
+        let visitID = visit.id
+        updateVisitCheckOut(visitID: visitID, checkOutAt: nil)
         Task {
             do {
                 try await performSupabaseRequest {
-                    try await service.deleteGymVisit(id: visit.id)
+                    try await service.reopenGymVisit(id: visitID)
                 }
             } catch {
                 await MainActor.run {
-                    gymVisits.insert(visit, at: min(visitIndex, gymVisits.count))
+                    updateVisitCheckOut(visitID: visitID, checkOutAt: visit.checkOutAt)
                     lastErrorMessage = error.localizedDescription
                     appMode = .failed(error.localizedDescription)
                 }
