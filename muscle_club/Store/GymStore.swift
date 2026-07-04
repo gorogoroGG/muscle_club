@@ -546,6 +546,32 @@ final class GymStore: ObservableObject {
         }
     }
 
+    func cancelCheckOut() {
+        guard isAuthenticated else { return }
+
+        let calendar = Calendar.current
+        guard let visitIndex = gymVisits.lastIndex(where: {
+            $0.memberID == currentUserID &&
+            calendar.isDateInToday($0.checkInAt) &&
+            !$0.isOpen
+        }) else { return }
+
+        let visit = gymVisits.remove(at: visitIndex)
+        Task {
+            do {
+                try await performSupabaseRequest {
+                    try await service.deleteGymVisit(id: visit.id)
+                }
+            } catch {
+                await MainActor.run {
+                    gymVisits.insert(visit, at: min(visitIndex, gymVisits.count))
+                    lastErrorMessage = error.localizedDescription
+                    appMode = .failed(error.localizedDescription)
+                }
+            }
+        }
+    }
+
     func sendChatMessage(_ rawBody: String) async -> Bool {
         guard isAuthenticated else {
             lastErrorMessage = "ログイン後にメッセージを送信してください。"

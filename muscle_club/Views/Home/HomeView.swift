@@ -6,6 +6,7 @@ struct HomeView: View {
 
     @State private var showNotifications = false
     @State private var showCancelCheckInPopup = false
+    @State private var showCancelCheckOutPopup = false
     @State private var showGymLocationSheet = false
     @State private var showRippleEffect = false
 
@@ -31,7 +32,8 @@ struct HomeView: View {
 
             CheckInStatusCard(
                 status: store.todayStatus(for: store.currentUser.id),
-                onTapCheckedIn: { showCancelCheckInPopup = true }
+                onTapCheckedIn: { showCancelCheckInPopup = true },
+                onTapCheckedOut: { showCancelCheckOutPopup = true }
             )
 
             GymPresenceMapCard(
@@ -64,6 +66,23 @@ struct HomeView: View {
 
                 Button("閉じる") {
                     showCancelCheckInPopup = false
+                }
+                .buttonStyle(GhostActionButtonStyle())
+            }
+        }
+        .appPopup(isPresented: $showCancelCheckOutPopup) {
+            PopupCard(
+                title: "チェックアウトを取り消しますか?",
+                message: "今日のチェックアウト記録を削除して、元の状態に戻します。"
+            ) {
+                Button("チェックアウトを取り消す") {
+                    store.cancelCheckOut()
+                    showCancelCheckOutPopup = false
+                }
+                .buttonStyle(SecondaryActionButtonStyle(tint: AppPalette.warning))
+
+                Button("閉じる") {
+                    showCancelCheckOutPopup = false
                 }
                 .buttonStyle(GhostActionButtonStyle())
             }
@@ -251,6 +270,7 @@ private struct IntentButton: View {
 private struct CheckInStatusCard: View {
     let status: GymStore.TodayGymStatus?
     let onTapCheckedIn: () -> Void
+    let onTapCheckedOut: () -> Void
 
     var body: some View {
         CardView(title: "CHECK-IN") {
@@ -265,7 +285,18 @@ private struct CheckInStatusCard: View {
                         .font(.caption)
                         .foregroundStyle(AppPalette.textSecondary)
                 case .checkedOut:
-                    StatusCircle(size: 108, fill: AppPalette.textSecondary.opacity(0.24), systemImage: "arrow.uturn.backward", label: "チェックアウト済み")
+                    Button(action: onTapCheckedOut) {
+                        StatusCircle(
+                            size: 108,
+                            fill: AppPalette.textSecondary.opacity(0.24),
+                            systemImage: "arrow.uturn.backward",
+                            label: "チェックアウト済み"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    Text("タップして取り消す")
+                        .font(.caption)
+                        .foregroundStyle(AppPalette.textSecondary)
                 default:
                     StatusCircle(size: 84, fill: Color.clear, strokeColor: AppPalette.stroke, systemImage: "location", label: "未チェックイン")
                 }
