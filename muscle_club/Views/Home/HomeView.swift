@@ -277,26 +277,24 @@ private struct CheckInStatusCard: View {
             VStack(spacing: 10) {
                 switch status {
                 case .checkedIn:
-                    Button(action: onTapCheckedIn) {
-                        StatusCircle(size: 148, fill: AppPalette.danger, systemImage: "checkmark", label: "チェックイン済み")
-                    }
-                    .buttonStyle(.plain)
-                    Text("タップして取り消す")
-                        .font(.caption)
-                        .foregroundStyle(AppPalette.textSecondary)
+                    StatusCircle(size: 148, fill: AppPalette.danger, systemImage: "checkmark", label: "チェックイン済み")
+                    StatusActionButton(
+                        title: "チェックインを取り消す",
+                        tint: AppPalette.danger,
+                        action: onTapCheckedIn
+                    )
                 case .checkedOut:
-                    Button(action: onTapCheckedOut) {
-                        StatusCircle(
-                            size: 108,
-                            fill: AppPalette.textSecondary.opacity(0.24),
-                            systemImage: "arrow.uturn.backward",
-                            label: "チェックアウト済み"
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    Text("タップして取り消す")
-                        .font(.caption)
-                        .foregroundStyle(AppPalette.textSecondary)
+                    StatusCircle(
+                        size: 108,
+                        fill: AppPalette.textSecondary.opacity(0.24),
+                        systemImage: "arrow.uturn.backward",
+                        label: "チェックアウト済み"
+                    )
+                    StatusActionButton(
+                        title: "チェックアウトを取り消す",
+                        tint: AppPalette.warning,
+                        action: onTapCheckedOut
+                    )
                 default:
                     StatusCircle(size: 84, fill: Color.clear, strokeColor: AppPalette.stroke, systemImage: "location", label: "未チェックイン")
                 }
@@ -335,6 +333,20 @@ private struct StatusCircle: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(AppPalette.textPrimary)
         }
+    }
+}
+
+private struct StatusActionButton: View {
+    let title: String
+    let tint: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+        }
+        .buttonStyle(SecondaryActionButtonStyle(tint: tint))
+        .accessibilityLabel(title)
     }
 }
 
