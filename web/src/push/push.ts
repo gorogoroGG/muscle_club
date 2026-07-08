@@ -18,7 +18,7 @@ export const isPushSupported =
 export async function registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {
   if (!isPushSupported) return null
   const base = import.meta.env.BASE_URL
-  return navigator.serviceWorker.register(`${base}sw.js`, { scope: base })
+  return navigator.serviceWorker.register(`${base}sw.js`, { scope: base, updateViaCache: 'none' })
 }
 
 export async function getExistingPushSubscription(): Promise<PushSubscription | null> {
