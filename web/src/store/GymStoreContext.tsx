@@ -136,6 +136,7 @@ interface GymStoreValue {
   checkIn: () => Promise<void>
   checkOut: () => Promise<void>
   cancelCheckIn: () => Promise<void>
+  cancelCheckOut: () => Promise<void>
   markNotificationsRead: () => Promise<void>
   updateProfile: (name: string) => Promise<void>
   updateAvatar: (image: Blob) => Promise<{ error: string | null }>
@@ -285,6 +286,14 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
 
   const openVisitFor = useCallback(
     (memberId: string) => gymVisits.find((v) => v.member_id === memberId && v.check_out_at === null),
+    [gymVisits],
+  )
+
+  const todayClosedVisitFor = useCallback(
+    (memberId: string) =>
+      gymVisits
+        .filter((v) => v.member_id === memberId && v.check_out_at !== null && isDateInToday(new Date(v.check_in_at)))
+        .sort((a, b) => new Date(b.check_in_at).getTime() - new Date(a.check_in_at).getTime())[0] ?? null,
     [gymVisits],
   )
 
@@ -668,6 +677,19 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     await createNotifications('checkInCancelled', 'チェックインが取り消されました', `${name} さんがチェックインを取り消しました。`)
   }, [currentUserId, openVisitFor, currentUser, createNotifications])
 
+  const cancelCheckOut = useCallback(async () => {
+    if (!currentUserId) return
+    const visit = todayClosedVisitFor(currentUserId)
+    if (!visit) return
+    setGymVisits((prev) => prev.map((v) => (v.id === visit.id ? { ...v, check_out_at: null } : v)))
+    if (DEMO_MODE) return
+    const { error } = await supabase.from('gym_visits').update({ check_out_at: null }).eq('id', visit.id)
+    if (error) {
+      setGymVisits((prev) => prev.map((v) => (v.id === visit.id ? { ...v, check_out_at: visit.check_out_at } : v)))
+      setLastErrorMessage(error.message)
+    }
+  }, [currentUserId, todayClosedVisitFor])
+
   const markNotificationsRead = useCallback(async () => {
     const unread = notifications.filter((n) => n.read_at === null)
     if (unread.length === 0) return
@@ -766,6 +788,7 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     checkIn,
     checkOut,
     cancelCheckIn,
+    cancelCheckOut,
     markNotificationsRead,
     updateProfile,
     updateAvatar,
