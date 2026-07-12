@@ -59,6 +59,15 @@ export function IconBell(props: IconProps) {
   )
 }
 
+export function IconClock(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </IconBase>
+  )
+}
+
 export function IconDumbbell(props: IconProps) {
   return (
     <IconBase {...props}>

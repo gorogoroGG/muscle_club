@@ -21,6 +21,7 @@ import {
   startOfDay,
   weekdayLabel,
 } from '../lib/date'
+import { isGymClosed } from '../lib/gymHours'
 import type {
   AppMode,
   AppNotification,
@@ -78,6 +79,7 @@ function demoData() {
   const attendanceRecords: AttendanceRecord[] = [
     { id: 'a-1', member_id: 'm-yugo', date: now.toISOString(), type: 'going' },
     { id: 'a-2', member_id: 'm-icchi', date: now.toISOString(), type: 'going' },
+    { id: 'a-3', member_id: 'm-ukasu', date: now.toISOString(), type: 'notGoing' },
   ]
   const notifications: AppNotification[] = [
     {
@@ -122,6 +124,7 @@ interface GymStoreValue {
   todayCheckedInMembers: Member[]
   todayCheckedOutMembers: Member[]
   todayGoingNotArrivedMembers: Member[]
+  todayNotGoingMembers: Member[]
   currentStreak: number
   currentUserMonthCount: number
   currentUserMonthMinutes: number
@@ -289,6 +292,14 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     [gymVisits],
   )
 
+  const todayAttendanceRecordFor = useCallback(
+    (memberId: string) =>
+      attendanceRecords
+        .filter((r) => r.member_id === memberId && isDateInToday(new Date(r.date)))
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0] ?? null,
+    [attendanceRecords],
+  )
+
   const todayClosedVisitFor = useCallback(
     (memberId: string) =>
       gymVisits
@@ -299,24 +310,14 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
 
   const isCurrentUserGoing = useMemo(
     () =>
-      Boolean(
-        currentUserId &&
-          attendanceRecords.some(
-            (r) => r.member_id === currentUserId && r.type === 'going' && isDateInToday(new Date(r.date)),
-          ),
-      ),
-    [attendanceRecords, currentUserId],
+      Boolean(currentUserId && todayAttendanceRecordFor(currentUserId)?.type === 'going'),
+    [currentUserId, todayAttendanceRecordFor],
   )
 
   const isCurrentUserNotGoing = useMemo(
     () =>
-      Boolean(
-        currentUserId &&
-          attendanceRecords.some(
-            (r) => r.member_id === currentUserId && r.type === 'notGoing' && isDateInToday(new Date(r.date)),
-          ),
-      ),
-    [attendanceRecords, currentUserId],
+      Boolean(currentUserId && todayAttendanceRecordFor(currentUserId)?.type === 'notGoing'),
+    [currentUserId, todayAttendanceRecordFor],
   )
 
   const isCurrentUserCheckedIn = useMemo(
@@ -329,13 +330,13 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
       if (openVisitFor(memberId)) return 'checkedIn'
       const hasVisitToday = gymVisits.some((v) => v.member_id === memberId && isDateInToday(new Date(v.check_in_at)))
       if (hasVisitToday) return 'checkedOut'
-      const isGoingToday = attendanceRecords.some(
-        (r) => r.member_id === memberId && r.type === 'going' && isDateInToday(new Date(r.date)),
-      )
+      const attendance = todayAttendanceRecordFor(memberId)
+      if (attendance?.type === 'notGoing') return 'notGoing'
+      const isGoingToday = attendance?.type === 'going'
       if (isGoingToday) return 'goingNotArrived'
       return null
     },
-    [attendanceRecords, gymVisits, openVisitFor],
+    [gymVisits, openVisitFor, todayAttendanceRecordFor],
   )
 
   const todayCheckedInMembers = useMemo(
@@ -348,6 +349,10 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
   )
   const todayGoingNotArrivedMembers = useMemo(
     () => members.filter((m) => todayStatus(m.id) === 'goingNotArrived'),
+    [members, todayStatus],
+  )
+  const todayNotGoingMembers = useMemo(
+    () => members.filter((m) => todayStatus(m.id) === 'notGoing'),
     [members, todayStatus],
   )
 
@@ -481,6 +486,7 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
 
   const createNotifications = useCallback(
     async (type: AppNotificationType, title: string, message: string) => {
+      if (isGymClosed(new Date())) return
       if (DEMO_MODE) return
       const recipients = notificationRecipientIds()
       if (recipients.length === 0 || !currentUserId) return
@@ -774,6 +780,7 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     todayCheckedInMembers,
     todayCheckedOutMembers,
     todayGoingNotArrivedMembers,
+    todayNotGoingMembers,
     currentStreak,
     currentUserMonthCount,
     currentUserMonthMinutes,

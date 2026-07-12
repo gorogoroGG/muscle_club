@@ -64,7 +64,7 @@ export interface AppNotification {
   read_at: string | null
 }
 
-export type TodayGymStatus = 'checkedIn' | 'checkedOut' | 'goingNotArrived'
+export type TodayGymStatus = 'checkedIn' | 'checkedOut' | 'goingNotArrived' | 'notGoing'
 
 export interface PeriodStat {
   label: string

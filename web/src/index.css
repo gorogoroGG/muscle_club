@@ -195,6 +195,11 @@ h1 {
 }
 
 /* Home header */
+.home-header {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 .home-header-row {
   display: flex;
   align-items: center;
@@ -243,6 +248,74 @@ h1 {
   justify-content: center;
   box-shadow: 0 2px 8px rgba(255, 111, 142, 0.5);
   animation: pop-in 0.35s var(--ease-spring);
+}
+
+.home-hours-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.home-hours-pill {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(90, 162, 255, 0.1);
+  color: #3d87e0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.home-hours-pill.is-closed {
+  background: rgba(35, 42, 59, 0.08);
+  color: var(--text-secondary);
+}
+.home-hours-note {
+  font-size: 12px;
+  color: #c77b1e;
+  font-weight: 700;
+}
+
+.closed-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(90, 162, 255, 0.12), transparent 42%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(241, 243, 250, 0.88));
+  border: 1px solid var(--stroke);
+  box-shadow: var(--shadow-card);
+}
+.closed-banner-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(35, 42, 59, 0.08);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.closed-banner-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.closed-banner-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.closed-banner-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 /* Intent buttons */
@@ -351,6 +424,11 @@ button.status-circle:active {
 .status-circle.checked-out {
   background: var(--surface-strong);
   color: var(--text-secondary);
+}
+.status-circle.not-going {
+  background: rgba(90, 162, 255, 0.12);
+  color: #3d87e0;
+  border: 1px solid rgba(90, 162, 255, 0.25);
 }
 .status-circle.idle {
   border: 2px dashed rgba(28, 38, 68, 0.18);
@@ -494,6 +572,10 @@ button.status-circle:active {
   border-color: rgba(255, 111, 142, 0.35);
   background: rgba(255, 111, 142, 0.08);
 }
+.status-stage.is-active.tone-notgoing {
+  border-color: rgba(90, 162, 255, 0.34);
+  background: rgba(90, 162, 255, 0.08);
+}
 .status-stage.is-active.tone-checkedin {
   border-color: rgba(62, 212, 136, 0.4);
   background: rgba(62, 212, 136, 0.1);
@@ -517,6 +599,9 @@ button.status-circle:active {
 }
 .status-stage.is-active.tone-going .status-stage-header {
   color: #ef5878;
+}
+.status-stage.is-active.tone-notgoing .status-stage-header {
+  color: #3d87e0;
 }
 .status-stage-icon {
   display: flex;
