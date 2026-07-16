@@ -45,6 +45,26 @@ function defaultInitials(name: string): string {
 // member. Dead-code-eliminated from production builds via import.meta.env.DEV.
 const DEMO_MODE = import.meta.env.DEV && new URLSearchParams(window.location.search).has('demo')
 const DEMO_AUTH_ID = 'demo-auth'
+const AUTH_BOOTSTRAP_TIMEOUT_MS = 12_000
+
+function formatErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timeoutId: number | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      reject(new Error(`${label}がタイムアウトしました。通信状況を確認して、もう一度お試しください。`))
+    }, ms)
+  })
+
+  try {
+    return await Promise.race([promise, timeout])
+  } finally {
+    if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+  }
+}
 
 function demoData() {
   const now = new Date()
@@ -191,20 +211,49 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     let cancelled = false
 
     async function bootstrap() {
-      const { data } = await supabase.auth.getSession()
-      if (cancelled) return
-      if (data.session) {
-        setSession(data.session)
-        return
+      try {
+        const { data, error } = await withTimeout(
+          supabase.auth.getSession(),
+          AUTH_BOOTSTRAP_TIMEOUT_MS,
+          'セッション確認',
+        )
+        if (cancelled) return
+
+        if (error) {
+          throw error
+        }
+
+        if (data.session) {
+          setSession(data.session)
+          return
+        }
+      } catch (error) {
+        if (cancelled) return
+        setLastErrorMessage(`保存済みセッションの復元に失敗したため、再接続します。(${formatErrorMessage(error)})`)
       }
-      const { data: anon, error } = await supabase.auth.signInAnonymously()
-      if (cancelled) return
-      if (error) {
-        setLastErrorMessage(error.message)
+
+      try {
+        const { data: anon, error } = await withTimeout(
+          supabase.auth.signInAnonymously(),
+          AUTH_BOOTSTRAP_TIMEOUT_MS,
+          '匿名ログイン',
+        )
+        if (cancelled) return
+
+        if (error) {
+          throw error
+        }
+
+        if (!anon.session) {
+          throw new Error('匿名セッションを作成できませんでした。')
+        }
+
+        setSession(anon.session)
+      } catch (error) {
+        if (cancelled) return
+        setLastErrorMessage(formatErrorMessage(error))
         setAppMode('failed')
-        return
       }
-      setSession(anon.session)
     }
 
     bootstrap()
