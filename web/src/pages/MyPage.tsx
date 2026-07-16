@@ -29,6 +29,25 @@ export function MyPage() {
       .catch(() => undefined)
   }, [])
 
+  useEffect(() => {
+    if (!store.currentUser || !isPushSupported) return
+    getExistingPushSubscription()
+      .then(async (subscription) => {
+        if (!subscription) return
+        const json = subscription.toJSON()
+        await supabase.from('push_subscriptions').upsert(
+          {
+            member_id: store.currentUser!.id,
+            endpoint: subscription.endpoint,
+            p256dh: json.keys?.p256dh,
+            auth: json.keys?.auth,
+          },
+          { onConflict: 'endpoint' },
+        )
+      })
+      .catch(() => undefined)
+  }, [store.currentUser])
+
   async function handleEnablePush() {
     if (!VAPID_PUBLIC_KEY || !store.currentUser) return
     setPushBusy(true)
@@ -96,7 +115,7 @@ export function MyPage() {
       <header>
         <div className="eyebrow">PROFILE</div>
         <h1>{store.currentUser.name}</h1>
-        <p className="muted">この端末に紐づいています</p>
+        <p className="muted">この起動中はこの名前で使います</p>
       </header>
 
       <Card title="ACCOUNT">
@@ -132,6 +151,9 @@ export function MyPage() {
               名前を更新
             </button>
           </form>
+          <button type="button" className="text-link" onClick={store.clearSelectedMember}>
+            別の名前を選ぶ
+          </button>
         </div>
       </Card>
 

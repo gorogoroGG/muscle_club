@@ -47,9 +47,24 @@ const DEMO_MODE = import.meta.env.DEV && new URLSearchParams(window.location.sea
 const DEMO_AUTH_ID = 'demo-auth'
 const AUTH_BOOTSTRAP_TIMEOUT_MS = 12_000
 const INITIAL_LOAD_TIMEOUT_MS = 15_000
+const SELECTED_MEMBER_STORAGE_KEY = 'muscle-club:selected-member-id'
 
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function readSelectedMemberId(): string | null {
+  if (typeof window === 'undefined') return null
+  return window.sessionStorage.getItem(SELECTED_MEMBER_STORAGE_KEY)
+}
+
+function writeSelectedMemberId(memberId: string | null): void {
+  if (typeof window === 'undefined') return
+  if (memberId) {
+    window.sessionStorage.setItem(SELECTED_MEMBER_STORAGE_KEY, memberId)
+    return
+  }
+  window.sessionStorage.removeItem(SELECTED_MEMBER_STORAGE_KEY)
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -131,7 +146,6 @@ interface GymStoreValue {
   appMode: AppMode
   session: Session | null
   members: Member[]
-  unclaimedMembers: Member[]
   attendanceRecords: AttendanceRecord[]
   gymVisits: GymVisit[]
   notifications: AppNotification[]
@@ -154,6 +168,7 @@ interface GymStoreValue {
   memberComparisonForWeek: (date?: Date) => MemberComparisonEntry[]
   memberComparisonForMonth: (date?: Date) => MemberComparisonEntry[]
   claimMember: (memberId: string) => Promise<{ error: string | null }>
+  clearSelectedMember: () => void
   resetIdentity: () => Promise<void>
   toggleGoing: () => Promise<void>
   toggleNotGoing: () => Promise<void>
@@ -178,17 +193,20 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [lastErrorMessage, setLastErrorMessage] = useState<string | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
+  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(() => readSelectedMemberId())
 
   const authUserId = DEMO_MODE ? DEMO_AUTH_ID : (session?.user.id ?? null)
 
   const currentUser = useMemo<Member | null>(() => {
-    if (!authUserId) return null
-    return members.find((m) => m.claimed_by === authUserId) ?? null
-  }, [members, authUserId])
+    if (DEMO_MODE) {
+      if (!authUserId) return null
+      return members.find((m) => m.claimed_by === authUserId) ?? null
+    }
+    if (!selectedMemberId) return null
+    return members.find((m) => m.id === selectedMemberId) ?? null
+  }, [members, authUserId, selectedMemberId])
 
   const currentUserId = currentUser?.id ?? null
-
-  const unclaimedMembers = useMemo(() => members.filter((m) => m.claimed_by === null), [members])
 
   // Bootstrap: reuse an existing session, or silently create an anonymous one.
   // No email is ever sent for this, so there's no OTP rate limit to hit.
@@ -271,7 +289,6 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!session) return
-    const activeSession = session
     let cancelled = false
 
     async function run() {
@@ -286,8 +303,8 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         setMembers(memberRows as Member[])
 
-        const claimed = (memberRows as Member[]).find((m) => m.claimed_by === activeSession.user.id)
-        if (!claimed) {
+        const selected = (memberRows as Member[]).find((m) => m.id === selectedMemberId) ?? null
+        if (!selected) {
           setAttendanceRecords([])
           setGymVisits([])
           setNotifications([])
@@ -303,7 +320,7 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
             supabase
               .from('notifications')
               .select('*')
-              .eq('recipient_member_id', claimed.id)
+              .eq('recipient_member_id', selected.id)
               .order('created_at', { ascending: false })
               .limit(100),
           ]),
@@ -332,7 +349,7 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [session, reloadToken])
+  }, [session, reloadToken, selectedMemberId])
 
   const reload = useCallback(() => setReloadToken((t) => t + 1), [])
 
@@ -566,28 +583,29 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
 
   const claimMember = useCallback(
     async (memberId: string) => {
-      if (!session) return { error: 'セッションがありません。少し待ってからもう一度試してください。' }
-      const { data, error } = await supabase
-        .from('members')
-        .update({ claimed_by: session.user.id })
-        .eq('id', memberId)
-        .is('claimed_by', null)
-        .select()
-        .maybeSingle()
-      if (error) return { error: error.message }
-      if (!data) return { error: 'その名前はすでに使われています。一覧を更新してみてください。' }
+      const exists = members.some((member) => member.id === memberId)
+      if (!exists) return { error: 'その名前が見つかりません。一覧を更新して、もう一度試してください。' }
+      writeSelectedMemberId(memberId)
+      setSelectedMemberId(memberId)
       reload()
       return { error: null }
     },
-    [session, reload],
+    [members, reload],
   )
 
-  // Discards the current (anonymous) identity and starts a fresh one. This is
-  // only useful as a recovery path from the failed screen -- it does not
-  // "log out" of a claimed member, since claiming is meant to be permanent
-  // per device.
+  const clearSelectedMember = useCallback(() => {
+    writeSelectedMemberId(null)
+    setSelectedMemberId(null)
+    setNotifications([])
+    setLastErrorMessage(null)
+    setAppMode('claiming')
+  }, [])
+
+  // Discards the current anonymous auth session and selected member, then starts fresh.
   const resetIdentity = useCallback(async () => {
     await supabase.auth.signOut()
+    writeSelectedMemberId(null)
+    setSelectedMemberId(null)
     setMembers([])
     setAttendanceRecords([])
     setGymVisits([])
@@ -824,7 +842,6 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     appMode,
     session,
     members,
-    unclaimedMembers,
     attendanceRecords,
     gymVisits,
     notifications,
@@ -847,6 +864,7 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     memberComparisonForWeek,
     memberComparisonForMonth,
     claimMember,
+    clearSelectedMember,
     resetIdentity,
     toggleGoing,
     toggleNotGoing,
