@@ -10,15 +10,28 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
 }
 
 export const isPushSupported =
-  typeof window !== 'undefined' &&
-  'serviceWorker' in navigator &&
-  'PushManager' in window &&
-  'Notification' in window
+  typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
+
+const isServiceWorkerSupported = typeof window !== 'undefined' && 'serviceWorker' in navigator
+
+function reloadWithCacheBust(paramName: string): void {
+  const url = new URL(window.location.href)
+  url.searchParams.set(paramName, Date.now().toString())
+  window.location.replace(url.toString())
+}
 
 export async function registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {
-  if (!isPushSupported) return null
+  if (!isServiceWorkerSupported) return null
   const base = import.meta.env.BASE_URL
-  return navigator.serviceWorker.register(`${base}sw.js`, { scope: base, updateViaCache: 'none' })
+  let reloadedByControllerChange = false
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloadedByControllerChange) return
+    reloadedByControllerChange = true
+    reloadWithCacheBust('sw-updated')
+  })
+  const registration = await navigator.serviceWorker.register(`${base}sw.js`, { scope: base, updateViaCache: 'none' })
+  await registration.update().catch(() => undefined)
+  return registration
 }
 
 export async function getExistingPushSubscription(): Promise<PushSubscription | null> {

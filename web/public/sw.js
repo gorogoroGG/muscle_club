@@ -1,14 +1,46 @@
+const SW_VERSION = '2026-07-16-3'
+const RELOAD_PARAM = 'swv'
+
 self.addEventListener('install', () => {
   self.skipWaiting()
 })
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim())
+  event.waitUntil(
+    (async () => {
+      await self.clients.claim()
+      const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      await Promise.all(
+        clientList.map(async (client) => {
+          if (!client.url.startsWith(self.registration.scope) || !('navigate' in client)) return
+          const targetUrl = new URL(client.url)
+          targetUrl.searchParams.set(RELOAD_PARAM, SW_VERSION)
+          try {
+            await client.navigate(targetUrl.toString())
+          } catch {
+            // ignore navigation failures; the next launch will still use the new worker
+          }
+        }),
+      )
+    })(),
+  )
 })
 
 function scopedUrl(path) {
   return new URL(path, self.registration.scope).href
 }
+
+self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') return
+  if (event.request.mode !== 'navigate') return
+
+  const requestUrl = new URL(event.request.url)
+  if (!requestUrl.href.startsWith(self.registration.scope)) return
+
+  event.respondWith(
+    fetch(event.request, { cache: 'reload' }).catch(() => fetch(event.request)),
+  )
+})
 
 self.addEventListener('push', (event) => {
   let payload = { title: '筋肉クラブ', body: '' }

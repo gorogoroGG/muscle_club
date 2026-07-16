@@ -1,5 +1,11 @@
 const CHECK_INTERVAL_MS = 5 * 60 * 1000
 
+function hardReloadWithCacheBust(paramName: string): void {
+  const url = new URL(window.location.href)
+  url.searchParams.set(paramName, Date.now().toString())
+  window.location.replace(url.toString())
+}
+
 function entryScriptPathFrom(html: string): string | null {
   const match = html.match(/<script[^>]+type=["']module["'][^>]+src=["']([^"']+)["']/i)
   if (!match) return null
@@ -21,11 +27,16 @@ async function checkForAppUpdate(): Promise<void> {
 
   const latestEntryPath = entryScriptPathFrom(await response.text())
   const currentEntryPath = currentEntryScriptPath()
-  if (!latestEntryPath || !currentEntryPath || latestEntryPath === currentEntryPath) return
+  if (!latestEntryPath) return
+  if (!currentEntryPath) {
+    hardReloadWithCacheBust('entry-missing')
+    return
+  }
+  if (latestEntryPath === currentEntryPath) return
 
   const registration = await navigator.serviceWorker?.getRegistration(base)
   await registration?.update().catch(() => undefined)
-  window.location.reload()
+  hardReloadWithCacheBust('app-update')
 }
 
 export function startAppUpdatePolling(): () => void {
