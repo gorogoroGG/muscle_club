@@ -46,6 +46,7 @@ function defaultInitials(name: string): string {
 const DEMO_MODE = import.meta.env.DEV && new URLSearchParams(window.location.search).has('demo')
 const DEMO_AUTH_ID = 'demo-auth'
 const AUTH_BOOTSTRAP_TIMEOUT_MS = 12_000
+const INITIAL_LOAD_TIMEOUT_MS = 15_000
 
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -276,7 +277,11 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     async function run() {
       setAppMode('loading')
       try {
-        const { data: memberRows, error: membersError } = await supabase.from('members').select('*')
+        const { data: memberRows, error: membersError } = await withTimeout(
+          Promise.resolve(supabase.from('members').select('*')),
+          INITIAL_LOAD_TIMEOUT_MS,
+          'メンバー一覧の読み込み',
+        )
         if (membersError) throw membersError
         if (cancelled) return
         setMembers(memberRows as Member[])
@@ -291,16 +296,20 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
           return
         }
 
-        const [attendanceRes, visitsRes, notificationsRes] = await Promise.all([
-          supabase.from('attendance_records').select('*'),
-          supabase.from('gym_visits').select('*'),
-          supabase
-            .from('notifications')
-            .select('*')
-            .eq('recipient_member_id', claimed.id)
-            .order('created_at', { ascending: false })
-            .limit(100),
-        ])
+        const [attendanceRes, visitsRes, notificationsRes] = await withTimeout(
+          Promise.all([
+            supabase.from('attendance_records').select('*'),
+            supabase.from('gym_visits').select('*'),
+            supabase
+              .from('notifications')
+              .select('*')
+              .eq('recipient_member_id', claimed.id)
+              .order('created_at', { ascending: false })
+              .limit(100),
+          ]),
+          INITIAL_LOAD_TIMEOUT_MS,
+          '初期データの読み込み',
+        )
         if (attendanceRes.error) throw attendanceRes.error
         if (visitsRes.error) throw visitsRes.error
         if (notificationsRes.error) throw notificationsRes.error
