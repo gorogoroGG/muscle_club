@@ -79,4 +79,4 @@ export interface MemberComparisonEntry {
   minutes: number
 }
 
-export type AppMode = 'loading' | 'claiming' | 'signedIn' | 'failed'
+export type AppMode = 'loading' | 'auth' | 'claiming' | 'signedIn' | 'failed'

@@ -47,24 +47,14 @@ const DEMO_MODE = import.meta.env.DEV && new URLSearchParams(window.location.sea
 const DEMO_AUTH_ID = 'demo-auth'
 const AUTH_BOOTSTRAP_TIMEOUT_MS = 12_000
 const INITIAL_LOAD_TIMEOUT_MS = 15_000
-const SELECTED_MEMBER_STORAGE_KEY = 'muscle-club:selected-member-id'
 
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function readSelectedMemberId(): string | null {
-  if (typeof window === 'undefined') return null
-  return window.sessionStorage.getItem(SELECTED_MEMBER_STORAGE_KEY)
-}
-
-function writeSelectedMemberId(memberId: string | null): void {
-  if (typeof window === 'undefined') return
-  if (memberId) {
-    window.sessionStorage.setItem(SELECTED_MEMBER_STORAGE_KEY, memberId)
-    return
-  }
-  window.sessionStorage.removeItem(SELECTED_MEMBER_STORAGE_KEY)
+function authRedirectUrl(): string | undefined {
+  if (typeof window === 'undefined') return undefined
+  return new URL(import.meta.env.BASE_URL, window.location.origin).toString()
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -146,6 +136,7 @@ interface GymStoreValue {
   appMode: AppMode
   session: Session | null
   members: Member[]
+  claimableMembers: Member[]
   attendanceRecords: AttendanceRecord[]
   gymVisits: GymVisit[]
   notifications: AppNotification[]
@@ -167,9 +158,9 @@ interface GymStoreValue {
   monthlyStats: (monthsBack?: number, memberId?: string) => PeriodStat[]
   memberComparisonForWeek: (date?: Date) => MemberComparisonEntry[]
   memberComparisonForMonth: (date?: Date) => MemberComparisonEntry[]
+  signInWithEmail: (email: string) => Promise<{ error: string | null }>
   claimMember: (memberId: string) => Promise<{ error: string | null }>
-  clearSelectedMember: () => void
-  resetIdentity: () => Promise<void>
+  signOut: () => Promise<void>
   toggleGoing: () => Promise<void>
   toggleNotGoing: () => Promise<void>
   checkIn: () => Promise<void>
@@ -193,23 +184,21 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [lastErrorMessage, setLastErrorMessage] = useState<string | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
-  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(() => readSelectedMemberId())
 
   const authUserId = DEMO_MODE ? DEMO_AUTH_ID : (session?.user.id ?? null)
 
   const currentUser = useMemo<Member | null>(() => {
-    if (DEMO_MODE) {
-      if (!authUserId) return null
-      return members.find((m) => m.claimed_by === authUserId) ?? null
-    }
-    if (!selectedMemberId) return null
-    return members.find((m) => m.id === selectedMemberId) ?? null
-  }, [members, authUserId, selectedMemberId])
+    if (!authUserId) return null
+    return members.find((m) => m.claimed_by === authUserId) ?? null
+  }, [members, authUserId])
 
   const currentUserId = currentUser?.id ?? null
+  const claimableMembers = useMemo(
+    () => members.filter((member) => member.claimed_by === null || member.claimed_by === authUserId),
+    [members, authUserId],
+  )
 
-  // Bootstrap: reuse an existing session, or silently create an anonymous one.
-  // No email is ever sent for this, so there's no OTP rate limit to hit.
+  // Bootstrap: restore an existing session if one is already stored locally.
   useEffect(() => {
     if (DEMO_MODE) {
       const seed = demoData()
@@ -246,39 +235,34 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
           setSession(data.session)
           return
         }
+        setSession(null)
+        setMembers([])
+        setAttendanceRecords([])
+        setGymVisits([])
+        setNotifications([])
+        setLastErrorMessage(null)
+        setAppMode('auth')
+        return
       } catch (error) {
         if (cancelled) return
         setLastErrorMessage(`保存済みセッションの復元に失敗したため、再接続します。(${formatErrorMessage(error)})`)
       }
-
-      try {
-        const { data: anon, error } = await withTimeout(
-          supabase.auth.signInAnonymously(),
-          AUTH_BOOTSTRAP_TIMEOUT_MS,
-          '匿名ログイン',
-        )
-        if (cancelled) return
-
-        if (error) {
-          throw error
-        }
-
-        if (!anon.session) {
-          throw new Error('匿名セッションを作成できませんでした。')
-        }
-
-        setSession(anon.session)
-      } catch (error) {
-        if (cancelled) return
-        setLastErrorMessage(formatErrorMessage(error))
-        setAppMode('failed')
-      }
+      if (!cancelled) setAppMode('failed')
     }
 
     bootstrap()
 
-    const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: subscription } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (cancelled) return
       setSession(nextSession)
+      if (event === 'SIGNED_OUT' || !nextSession) {
+        setMembers([])
+        setAttendanceRecords([])
+        setGymVisits([])
+        setNotifications([])
+        setLastErrorMessage(null)
+        setAppMode('auth')
+      }
     })
 
     return () => {
@@ -289,6 +273,7 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!session) return
+    const activeSession = session
     let cancelled = false
 
     async function run() {
@@ -303,8 +288,8 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         setMembers(memberRows as Member[])
 
-        const selected = (memberRows as Member[]).find((m) => m.id === selectedMemberId) ?? null
-        if (!selected) {
+        const claimed = (memberRows as Member[]).find((m) => m.claimed_by === activeSession.user.id) ?? null
+        if (!claimed) {
           setAttendanceRecords([])
           setGymVisits([])
           setNotifications([])
@@ -320,7 +305,7 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
             supabase
               .from('notifications')
               .select('*')
-              .eq('recipient_member_id', selected.id)
+              .eq('recipient_member_id', claimed.id)
               .order('created_at', { ascending: false })
               .limit(100),
           ]),
@@ -349,7 +334,7 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [session, reloadToken, selectedMemberId])
+  }, [session, reloadToken])
 
   const reload = useCallback(() => setReloadToken((t) => t + 1), [])
 
@@ -581,43 +566,48 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     [notificationRecipientIds, currentUserId],
   )
 
+  const signInWithEmail = useCallback(async (email: string) => {
+    const normalized = email.trim()
+    if (!normalized) return { error: 'メールアドレスを入力してください。' }
+    const { error } = await supabase.auth.signInWithOtp({
+      email: normalized,
+      options: {
+        emailRedirectTo: authRedirectUrl(),
+      },
+    })
+    if (error) return { error: error.message }
+    return { error: null }
+  }, [])
+
   const claimMember = useCallback(
     async (memberId: string) => {
-      const exists = members.some((member) => member.id === memberId)
-      if (!exists) return { error: 'その名前が見つかりません。一覧を更新して、もう一度試してください。' }
-      writeSelectedMemberId(memberId)
-      setSelectedMemberId(memberId)
+      if (!session) return { error: 'ログイン状態を確認できません。もう一度メールリンクから入り直してください。' }
+      const { data, error } = await supabase
+        .from('members')
+        .update({ claimed_by: session.user.id })
+        .eq('id', memberId)
+        .is('claimed_by', null)
+        .select()
+        .maybeSingle()
+      if (error) return { error: error.message }
+      if (!data) return { error: 'その名前はすでに使われています。一覧を更新してみてください。' }
       reload()
       return { error: null }
     },
-    [members, reload],
+    [session, reload],
   )
 
-  const clearSelectedMember = useCallback(() => {
-    writeSelectedMemberId(null)
-    setSelectedMemberId(null)
-    setNotifications([])
-    setLastErrorMessage(null)
-    setAppMode('claiming')
-  }, [])
-
-  // Discards the current anonymous auth session and selected member, then starts fresh.
-  const resetIdentity = useCallback(async () => {
-    await supabase.auth.signOut()
-    writeSelectedMemberId(null)
-    setSelectedMemberId(null)
+  const signOut = useCallback(async () => {
+    if (!DEMO_MODE) {
+      await supabase.auth.signOut({ scope: 'local' })
+    }
+    setSession(null)
     setMembers([])
     setAttendanceRecords([])
     setGymVisits([])
     setNotifications([])
-    setAppMode('loading')
-    const { data, error } = await supabase.auth.signInAnonymously()
-    if (error) {
-      setLastErrorMessage(error.message)
-      setAppMode('failed')
-      return
-    }
-    setSession(data.session)
+    setLastErrorMessage(null)
+    setAppMode('auth')
   }, [])
 
   // All write actions below update local state first so taps feel instant,
@@ -842,6 +832,7 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     appMode,
     session,
     members,
+    claimableMembers,
     attendanceRecords,
     gymVisits,
     notifications,
@@ -863,9 +854,9 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     monthlyStats,
     memberComparisonForWeek,
     memberComparisonForMonth,
+    signInWithEmail,
     claimMember,
-    clearSelectedMember,
-    resetIdentity,
+    signOut,
     toggleGoing,
     toggleNotGoing,
     checkIn,

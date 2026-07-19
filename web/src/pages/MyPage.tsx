@@ -115,7 +115,7 @@ export function MyPage() {
       <header>
         <div className="eyebrow">PROFILE</div>
         <h1>{store.currentUser.name}</h1>
-        <p className="muted">この起動中はこの名前で使います</p>
+        <p className="muted">{store.session?.user.email ?? 'メールでログイン中'}</p>
       </header>
 
       <Card title="ACCOUNT">
@@ -151,8 +151,8 @@ export function MyPage() {
               名前を更新
             </button>
           </form>
-          <button type="button" className="text-link" onClick={store.clearSelectedMember}>
-            別の名前を選ぶ
+          <button type="button" className="text-link" onClick={() => void store.signOut()}>
+            ログアウトする
           </button>
         </div>
       </Card>

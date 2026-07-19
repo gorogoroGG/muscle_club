@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { GymStoreProvider, useGymStore } from './store/GymStoreContext'
+import { AuthPage } from './pages/AuthPage'
 import { ClaimMemberPage } from './pages/ClaimMemberPage'
 import { HomePage } from './pages/HomePage'
 import { RecordPage } from './pages/RecordPage'
@@ -15,9 +16,13 @@ function Screen() {
       <div className="centered-state">
         <div className="spinner" />
         <h2>同期しています</h2>
-        <p className="muted">アカウントとトレーニング記録を読み込んでいます。</p>
+        <p className="muted">ログイン状態とトレーニング記録を読み込んでいます。</p>
       </div>
     )
+  }
+
+  if (store.appMode === 'auth') {
+    return <AuthPage />
   }
 
   if (store.appMode === 'claiming') {
@@ -32,8 +37,8 @@ function Screen() {
         <button className="primary-button" onClick={store.reload}>
           もう一度読み込む
         </button>
-        <button className="secondary-button danger" onClick={store.resetIdentity}>
-          リセットする
+        <button className="secondary-button danger" onClick={() => void store.signOut()}>
+          ログアウトする
         </button>
       </div>
     )

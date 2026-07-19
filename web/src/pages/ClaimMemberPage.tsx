@@ -31,18 +31,19 @@ export function ClaimMemberPage() {
           <IconDumbbell size={46} />
         </div>
         <h1>筋肉クラブ</h1>
-        <p>使う名前をタップしてください。起動するたびに選べます。</p>
+        <p>あなたの名前をタップしてください。このログインにひも付きます。</p>
+        {store.session?.user.email && <p className="muted small">ログイン中: {store.session.user.email}</p>}
       </div>
 
       <section className="card">
         <div className="card-title">WHO ARE YOU</div>
-        {store.members.length === 0 ? (
+        {store.claimableMembers.length === 0 ? (
           <p className="auth-card-body">
             使えるアカウントがありません。管理者に連絡してメンバー登録をお願いしてください。
           </p>
         ) : (
           <div className="member-picker-list">
-            {store.members.map((member) => (
+            {store.claimableMembers.map((member) => (
               <button
                 key={member.id}
                 className="member-picker-row"
@@ -60,13 +61,16 @@ export function ClaimMemberPage() {
         <button className="text-link" onClick={() => store.reload()}>
           一覧を更新する
         </button>
+        <button className="text-link" onClick={() => void store.signOut()}>
+          別のメールでログインする
+        </button>
       </section>
 
       {confirmMember && (
         <div className="sheet-backdrop" onClick={() => setConfirmMember(null)}>
           <div className="popup-card" onClick={(e) => e.stopPropagation()}>
             <h3>「{confirmMember.name}」で間違いないですか?</h3>
-            <p className="muted">今回はこの名前としてアプリを開きます。</p>
+            <p className="muted">このメールアドレスと名前をひも付けます。</p>
             <button className="primary-button" onClick={handleConfirm}>
               これは自分です
             </button>
