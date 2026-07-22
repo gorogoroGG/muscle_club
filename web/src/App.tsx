@@ -1,7 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { GymStoreProvider, useGymStore } from './store/GymStoreContext'
 import { AuthPage } from './pages/AuthPage'
-import { ClaimMemberPage } from './pages/ClaimMemberPage'
 import { HomePage } from './pages/HomePage'
 import { RecordPage } from './pages/RecordPage'
 import { MyPage } from './pages/MyPage'
@@ -23,10 +22,6 @@ function Screen() {
 
   if (store.appMode === 'auth') {
     return <AuthPage />
-  }
-
-  if (store.appMode === 'claiming') {
-    return <ClaimMemberPage />
   }
 
   if (store.appMode === 'failed') {

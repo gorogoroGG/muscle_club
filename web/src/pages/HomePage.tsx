@@ -1,71 +1,25 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useGymStore } from '../store/GymStoreContext'
 import { Card } from '../components/Card'
 import { Avatar } from '../components/Avatar'
-import { NotificationsSheet } from '../components/NotificationsSheet'
 import {
-  IconBell,
   IconCalendar,
   IconCheck,
   IconDumbbell,
-  IconClock,
   IconLogOut,
-  IconMapPin,
   IconMoon,
   IconRefresh,
   IconUndo,
+  IconUser,
 } from '../components/Icons'
-import { formatMinutes } from '../lib/date'
-import { getGymHours } from '../lib/gymHours'
-import type { Member } from '../types'
-
-type ConfirmAction = 'checkIn' | 'checkOut'
+import type { Member, TodayGymStatus } from '../types'
 
 export function HomePage() {
   const store = useGymStore()
-  const [showNotifications, setShowNotifications] = useState(false)
-  const [showCancelConfirm, setShowCancelConfirm] = useState(false)
-  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null)
-  const [now, setNow] = useState(() => new Date())
   const [isReloading, setIsReloading] = useState(false)
-  const [pullStartY, setPullStartY] = useState<number | null>(null)
-  const [pullDistance, setPullDistance] = useState(0)
-  const [scheduleNow, setScheduleNow] = useState(() => new Date())
 
   const currentUserId = store.currentUser?.id ?? null
   const status = currentUserId ? store.todayStatus(currentUserId) : null
-  const gymHours = useMemo(() => getGymHours(scheduleNow), [scheduleNow])
-  const currentVisit = useMemo(
-    () => store.gymVisits.find((v) => v.member_id === currentUserId && v.check_out_at === null) ?? null,
-    [currentUserId, store.gymVisits],
-  )
-  const elapsedSeconds = currentVisit
-    ? Math.max(0, Math.floor((now.getTime() - new Date(currentVisit.check_in_at).getTime()) / 1000))
-    : 0
-  const confirmCopy =
-    confirmAction === 'checkIn'
-      ? {
-          title: 'チェックインしますか?',
-          message: '今からジム滞在時間の記録を開始します。',
-          button: 'チェックインする',
-        }
-      : {
-          title: 'チェックアウトしますか?',
-          message: '現在の滞在時間をここで終了して記録します。',
-          button: 'チェックアウトする',
-        }
-
-  useEffect(() => {
-    const intervalMs = currentVisit ? 1000 : 60000
-    setNow(new Date())
-    const timer = window.setInterval(() => setNow(new Date()), intervalMs)
-    return () => window.clearInterval(timer)
-  }, [currentVisit])
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setScheduleNow(new Date()), 60000)
-    return () => window.clearInterval(timer)
-  }, [])
 
   function handleReload() {
     setIsReloading(true)
@@ -73,276 +27,185 @@ export function HomePage() {
     window.setTimeout(() => setIsReloading(false), 700)
   }
 
-  function handlePullStart(clientY: number) {
-    if (window.scrollY <= 0) setPullStartY(clientY)
-  }
-
-  function handlePullMove(clientY: number) {
-    if (pullStartY === null || window.scrollY > 0) return
-    const distance = clientY - pullStartY
-    if (distance > 0) setPullDistance(Math.min(distance, 120))
-  }
-
-  function handlePullEnd() {
-    if (pullDistance > 72) handleReload()
-    setPullStartY(null)
-    setPullDistance(0)
-  }
-
   if (!store.currentUser) return null
 
   return (
-    <div
-      className="page"
-      onTouchStart={(event) => handlePullStart(event.touches[0]?.clientY ?? 0)}
-      onTouchMove={(event) => handlePullMove(event.touches[0]?.clientY ?? 0)}
-      onTouchEnd={handlePullEnd}
-    >
-      <div
-        className={`pull-refresh${pullDistance > 72 ? ' is-ready' : ''}${isReloading ? ' is-loading' : ''}`}
-        style={{
-          opacity: pullDistance > 6 || isReloading ? 1 : 0,
-          transform: `translate(-50%, ${Math.min(pullDistance, 96) - 68}px)`,
-        }}
-      >
-        <IconRefresh size={15} />
-        <span>{isReloading ? 'ロード中' : pullDistance > 72 ? '離してロード' : '下に引っ張ってロード'}</span>
-      </div>
+    <div className="page">
       <header className="home-header">
         <div className="eyebrow">TODAY</div>
         <div className="home-header-row">
-          <h1>今日のジム</h1>
-          <div className="home-header-actions">
-            <button className="bell-button" onClick={handleReload} aria-label="ロード" title="ロード">
-              <IconRefresh size={19} />
-            </button>
-            <button className="bell-button" onClick={() => setShowNotifications(true)} aria-label="通知">
-              <IconBell size={20} />
-              {store.unreadNotificationCount > 0 && (
-                <span className="badge-dot">{Math.min(store.unreadNotificationCount, 9)}</span>
-              )}
-            </button>
+          <div>
+            <h1>今日のジム</h1>
+            <p className="muted">行く人、今いる人、終わった人をひと目で確認できます。</p>
           </div>
-        </div>
-        <div className="home-hours-row">
-          <div className={`home-hours-pill${gymHours.isClosed ? ' is-closed' : ''}`}>
-            {gymHours.isClosed ? <IconMoon size={14} /> : <IconClock size={14} />}
-            <span>{gymHours.hoursText}</span>
-          </div>
-          {gymHours.noticeText && <div className="home-hours-note">{gymHours.noticeText}</div>}
+          <button className={`bell-button${isReloading ? ' is-spinning' : ''}`} onClick={handleReload} aria-label="ロード" title="ロード">
+            <IconRefresh size={19} />
+          </button>
         </div>
       </header>
 
-      {gymHours.isClosed ? (
-        <div className="closed-banner">
-          <div className="closed-banner-icon">
-            <IconMoon size={24} />
-          </div>
-          <div className="closed-banner-copy">
-            <p className="closed-banner-title">本日はお休みです。</p>
-            <p className="closed-banner-sub">毎週月曜日と月末は休館日です。</p>
+      <Card title="MY STATUS">
+        <div className="current-user-strip">
+          <Avatar member={store.currentUser} size={48} />
+          <div>
+            <div className="current-user-name">{store.currentUser.name}</div>
+            <div className="muted small">{statusLabel(status)}</div>
           </div>
         </div>
-      ) : (
-        <Card title="今日の予定">
-          <div className="intent-row">
-            {!store.isCurrentUserNotGoing && (
-              <button
-                className={`intent-button danger${store.isCurrentUserGoing ? ' expanded' : ''}`}
-                disabled={store.isCurrentUserCheckedIn}
-                onClick={() => store.toggleGoing()}
-              >
-                <span className="intent-icon">
-                  <IconDumbbell size={28} />
-                </span>
-                <span>参加</span>
-              </button>
-            )}
-            {!store.isCurrentUserGoing && (
-              <button
-                className={`intent-button accent${store.isCurrentUserNotGoing ? ' expanded' : ''}`}
-                disabled={store.isCurrentUserCheckedIn}
-                onClick={() => store.toggleNotGoing()}
-              >
-                <span className="intent-icon">
-                  <IconMoon size={28} />
-                </span>
-                <span>不参加</span>
-              </button>
-            )}
-          </div>
-        </Card>
-      )}
+        <div className="intent-row">
+          <button
+            className={`intent-button danger${store.isCurrentUserGoing ? ' expanded' : ''}`}
+            disabled={store.isCurrentUserCheckedIn}
+            onClick={() => store.setTodayIntent(store.isCurrentUserGoing ? null : 'going')}
+          >
+            <span className="intent-icon">
+              <IconDumbbell size={28} />
+            </span>
+            <span>行く</span>
+          </button>
+          <button
+            className={`intent-button accent${store.isCurrentUserNotGoing ? ' expanded' : ''}`}
+            disabled={store.isCurrentUserCheckedIn}
+            onClick={() => store.setTodayIntent(store.isCurrentUserNotGoing ? null : 'not_going')}
+          >
+            <span className="intent-icon">
+              <IconMoon size={28} />
+            </span>
+            <span>行かない</span>
+          </button>
+        </div>
+      </Card>
 
-      {!gymHours.isClosed && (
-        <Card title="CHECK-IN">
-          <div className="checkin-status">
-            {status === 'checkedIn' ? (
-              <>
-                <button className="status-circle checked-in" onClick={() => setShowCancelConfirm(true)}>
-                  <IconCheck size={52} strokeWidth={2.5} />
-                </button>
-                <p className="status-label">チェックイン済み</p>
-                {currentVisit && (
-                  <div className="elapsed-panel" aria-live="polite">
-                    <span className="elapsed-caption">チェックインから</span>
-                    <span className="elapsed-time">{formatElapsedDuration(elapsedSeconds)}</span>
-                    <span className="elapsed-caption">経過</span>
-                  </div>
-                )}
-                <button className="primary-button" onClick={() => setConfirmAction('checkOut')}>
-                  チェックアウトする
-                </button>
-                <button className="text-link" onClick={() => setShowCancelConfirm(true)}>
-                  チェックインを取り消す
-                </button>
-              </>
-            ) : status === 'checkedOut' ? (
-              <>
-                <div className="status-circle checked-out">
-                  <IconUndo size={44} />
-                </div>
-                <p className="status-label">チェックアウト済み</p>
-                <button className="text-link checkout-cancel-link" onClick={() => store.cancelCheckOut()}>
-                  チェックアウトを取り消す
-                </button>
-              </>
-            ) : status === 'notGoing' ? (
-              <>
-                <div className="status-circle not-going">
-                  <IconMoon size={38} />
-                </div>
-                <p className="status-label">不参加</p>
-              </>
-            ) : (
-              <>
-                <div className="status-circle idle">
-                  <IconMapPin size={40} />
-                </div>
-                <p className="status-label">未チェックイン</p>
-                <button className="primary-button" onClick={() => setConfirmAction('checkIn')}>
-                  チェックインする
-                </button>
-              </>
-            )}
-          </div>
-        </Card>
-      )}
+      <Card title="CHECK-IN">
+        <div className="checkin-status">
+          {status === 'checkedIn' ? (
+            <>
+              <button className="status-circle checked-in" onClick={() => store.checkOut()} aria-label="チェックアウト">
+                <IconCheck size={52} strokeWidth={2.5} />
+              </button>
+              <p className="status-label">今ジムにいます</p>
+              <button className="primary-button" onClick={() => store.checkOut()}>
+                チェックアウトする
+              </button>
+              <button className="text-link" onClick={() => store.cancelCheckIn()}>
+                チェックインを取り消す
+              </button>
+            </>
+          ) : status === 'checkedOut' ? (
+            <>
+              <div className="status-circle checked-out">
+                <IconUndo size={44} />
+              </div>
+              <p className="status-label">今日のトレーニングは完了</p>
+              <button className="secondary-button" onClick={() => store.cancelCheckOut()}>
+                完了を取り消して在館中に戻す
+              </button>
+            </>
+          ) : status === 'notGoing' ? (
+            <>
+              <div className="status-circle not-going">
+                <IconMoon size={38} />
+              </div>
+              <p className="status-label">今日は行かない予定</p>
+              <button className="secondary-button" onClick={() => store.setTodayIntent(null)}>
+                予定を未定に戻す
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="status-circle idle">
+                <IconDumbbell size={40} />
+              </div>
+              <p className="status-label">{status === 'goingNotArrived' ? '行く予定です' : 'まだ未チェックイン'}</p>
+              <button className="primary-button" onClick={() => store.checkIn()}>
+                チェックインする
+              </button>
+            </>
+          )}
+        </div>
+      </Card>
 
-      <Card title="TODAY">
-        <h3 className="section-heading">今日の様子</h3>
+      <Card title="CLUB">
+        <h3 className="section-heading">メンバーの状況</h3>
         <div className="status-flow">
           <StatusStage
             tone="going"
             icon={<IconCalendar size={14} />}
-            label="予定"
+            label="今日行く"
             members={store.todayGoingNotArrivedMembers}
-            emptyText="まだ誰も予定していません"
+            emptyText="まだ予定している人はいません"
           />
-          <div className="status-flow-arrow">↓</div>
-          <StatusStage
-            tone="notgoing"
-            icon={<IconMoon size={14} />}
-            label="不参加"
-            members={store.todayNotGoingMembers}
-            emptyText="今日は不参加の人はいません"
-          />
-          <div className="status-flow-arrow">↓</div>
           <StatusStage
             tone="checkedin"
             icon={<IconDumbbell size={14} />}
-            label="ジムにいる"
+            label="今ジムにいる"
             members={store.todayCheckedInMembers}
-            emptyText="今チェックイン中の人はいません"
+            emptyText="今ジムにいる人はいません"
           />
-          <div className="status-flow-arrow">↓</div>
           <StatusStage
             tone="checkedout"
             icon={<IconLogOut size={14} />}
-            label="チェックアウト済み"
+            label="終わった"
             members={store.todayCheckedOutMembers}
-            emptyText="まだ誰も退出していません"
+            emptyText="まだ完了した人はいません"
+          />
+          <StatusStage
+            tone="notgoing"
+            icon={<IconMoon size={14} />}
+            label="行かない"
+            members={store.todayNotGoingMembers}
+            emptyText="行かない予定の人はいません"
+          />
+          <StatusStage
+            tone="unknown"
+            icon={<IconUser size={14} />}
+            label="未定"
+            members={store.todayUnknownMembers}
+            emptyText="全員の状況が出ています"
           />
         </div>
       </Card>
 
       <Card title="SUMMARY">
-        <h3 className="section-heading">今月のサマリー</h3>
+        <h3 className="section-heading">あなたの回数</h3>
         <div className="metric-grid">
           <div className="metric-tile">
             <div className="metric-value">{store.currentUserMonthCount}回</div>
             <div className="metric-label">今月</div>
           </div>
           <div className="metric-tile">
-            <div className="metric-value">{store.currentStreak}日</div>
-            <div className="metric-label">連続</div>
+            <div className="metric-value">{store.currentUserMonthRank ? `${store.currentUserMonthRank}位` : '-'}</div>
+            <div className="metric-label">今月順位</div>
           </div>
           <div className="metric-tile">
-            <div className="metric-value">{formatMinutes(store.currentUserMonthMinutes)}</div>
-            <div className="metric-label">滞在時間</div>
+            <div className="metric-value">{store.currentUserTotalCount}回</div>
+            <div className="metric-label">通算</div>
           </div>
         </div>
       </Card>
 
-      {showNotifications && <NotificationsSheet onClose={() => setShowNotifications(false)} />}
-
-      {confirmAction && (
-        <div className="sheet-backdrop" onClick={() => setConfirmAction(null)}>
-          <div className="popup-card" onClick={(e) => e.stopPropagation()}>
-            <h3>{confirmCopy.title}</h3>
-            <p>{confirmCopy.message}</p>
-            <button
-              className="primary-button"
-              onClick={async () => {
-                const action = confirmAction
-                setConfirmAction(null)
-                if (action === 'checkIn') {
-                  await store.checkIn()
-                } else {
-                  await store.checkOut()
-                }
-              }}
-            >
-              {confirmCopy.button}
-            </button>
-            <button className="ghost-button" onClick={() => setConfirmAction(null)}>
-              閉じる
-            </button>
-          </div>
-        </div>
-      )}
-
-      {showCancelConfirm && (
-        <div className="sheet-backdrop" onClick={() => setShowCancelConfirm(false)}>
-          <div className="popup-card" onClick={(e) => e.stopPropagation()}>
-            <h3>チェックインを取り消しますか?</h3>
-            <p>間違ってチェックインした場合に取り消せます。</p>
-            <button
-              className="secondary-button danger"
-              onClick={() => {
-                store.cancelCheckIn()
-                setShowCancelConfirm(false)
-              }}
-            >
-              チェックインを取り消す
-            </button>
-            <button className="ghost-button" onClick={() => setShowCancelConfirm(false)}>
-              閉じる
-            </button>
-          </div>
-        </div>
+      {store.lastErrorMessage && (
+        <Card title="ERROR">
+          <div className="message-block danger">{store.lastErrorMessage}</div>
+        </Card>
       )}
     </div>
   )
 }
 
-function formatElapsedDuration(totalSeconds: number): string {
-  const hours = Math.floor(totalSeconds / 3600)
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-  const seconds = totalSeconds % 60
-  const paddedMinutes = String(minutes).padStart(hours > 0 ? 2 : 1, '0')
-  const paddedSeconds = String(seconds).padStart(2, '0')
-  return hours > 0 ? `${hours}:${paddedMinutes}:${paddedSeconds}` : `${paddedMinutes}:${paddedSeconds}`
+function statusLabel(status: TodayGymStatus | null): string {
+  switch (status) {
+    case 'checkedIn':
+      return '今ジムにいます'
+    case 'checkedOut':
+      return '今日のトレーニングは完了'
+    case 'goingNotArrived':
+      return '今日は行く予定'
+    case 'notGoing':
+      return '今日は行かない予定'
+    default:
+      return '今日はまだ未定'
+  }
 }
 
 function StatusStage({
@@ -352,24 +215,25 @@ function StatusStage({
   members,
   emptyText,
 }: {
-  tone: 'going' | 'notgoing' | 'checkedin' | 'checkedout'
+  tone: 'going' | 'checkedin' | 'checkedout' | 'notgoing' | 'unknown'
   icon: ReactNode
   label: string
   members: Member[]
   emptyText: string
 }) {
-  const isActive = members.length > 0
+  const active = members.length > 0
   return (
-    <div className={`status-stage tone-${tone}${isActive ? ' is-active' : ''}`}>
+    <div className={`status-stage tone-${tone}${active ? ' is-active' : ''}`}>
       <div className="status-stage-header">
         <span className="status-stage-icon">{icon}</span>
         <span>{label}</span>
+        <span className="status-count">{members.length}</span>
       </div>
-      {isActive ? (
+      {active ? (
         <div className="status-stage-chips">
           {members.map((member) => (
             <div key={member.id} className="member-chip">
-              <Avatar member={member} size={40} />
+              <Avatar member={member} size={38} />
               <span>{member.name}</span>
             </div>
           ))}

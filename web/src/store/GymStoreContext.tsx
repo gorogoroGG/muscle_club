@@ -7,57 +7,59 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import type { Session } from '@supabase/supabase-js'
+import type { Session, User } from '@supabase/supabase-js'
 import { isSupabaseConfigured, supabase } from '../lib/supabaseClient'
 import {
   addDays,
-  addMonths,
   isDateInToday,
   isSameDay,
   isSameMonth,
-  minutesBetween,
   mondayOfWeek,
-  monthLabel,
   startOfDay,
   weekdayLabel,
 } from '../lib/date'
-import { isGymClosed } from '../lib/gymHours'
 import type {
   AppMode,
-  AppNotification,
-  AppNotificationType,
-  AttendanceRecord,
+  AvatarColor,
+  DailyIntent,
+  DailyIntentStatus,
   GymVisit,
   Member,
-  MemberComparisonEntry,
   PeriodStat,
+  RankingEntry,
+  RankingPeriod,
   TodayGymStatus,
 } from '../types'
 
-function defaultInitials(name: string): string {
-  const normalized = name.toUpperCase().replace(/[^A-Z0-9]/g, '')
-  const prefix = normalized.slice(0, 2)
-  return prefix.padEnd(2, 'M')
-}
-
-// Dev-only demo mode (?demo=1): renders the signed-in screens with local mock
-// data and no Supabase traffic, so UI work doesn't require claiming a real
-// member. Dead-code-eliminated from production builds via import.meta.env.DEV.
-const DEMO_MODE = import.meta.env.DEV && new URLSearchParams(window.location.search).has('demo')
-const DEMO_AUTH_ID = 'demo-auth'
 const AUTH_BOOTSTRAP_TIMEOUT_MS = 12_000
 const INITIAL_LOAD_TIMEOUT_MS = 15_000
+const DEMO_MODE = import.meta.env.DEV && new URLSearchParams(window.location.search).has('demo')
+const DEMO_AUTH_ID = '00000000-0000-4000-8000-000000000001'
 
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function authRedirectUrl(): string | undefined {
-  if (typeof window === 'undefined') return undefined
-  return new URL(import.meta.env.BASE_URL, window.location.origin).toString()
+function defaultInitials(name: string, email?: string | null): string {
+  const source = name.trim() || email?.split('@')[0] || 'member'
+  const normalized = source.toUpperCase().replace(/[^A-Z0-9]/g, '')
+  return (normalized || 'ME').slice(0, 2).padEnd(2, 'M')
 }
 
-async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+function todayDateKey(date = new Date()): string {
+  const year = date.getFullYear()
+  const month = `${date.getMonth() + 1}`.padStart(2, '0')
+  const day = `${date.getDate()}`.padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function randomAvatarColor(seed: string): AvatarColor {
+  const colors: AvatarColor[] = ['blue', 'teal', 'green', 'orange', 'pink', 'indigo', 'purple', 'red', 'yellow']
+  const total = Array.from(seed).reduce((sum, char) => sum + char.charCodeAt(0), 0)
+  return colors[total % colors.length]
+}
+
+async function withTimeout<T>(promise: PromiseLike<T>, ms: number, label: string): Promise<T> {
   let timeoutId: number | undefined
   const timeout = new Promise<never>((_, reject) => {
     timeoutId = window.setTimeout(() => {
@@ -72,6 +74,22 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
   }
 }
 
+function periodContains(date: Date, period: RankingPeriod, now = new Date()): boolean {
+  if (period === 'all') return true
+  if (period === 'month') return isSameMonth(date, now)
+  const weekStart = mondayOfWeek(now)
+  const weekEnd = addDays(weekStart, 7)
+  return date >= weekStart && date < weekEnd
+}
+
+function countVisitDays(visits: GymVisit[], memberId: string, period: RankingPeriod): number {
+  return new Set(
+    visits
+      .filter((visit) => visit.member_id === memberId && periodContains(new Date(visit.check_in_at), period))
+      .map((visit) => startOfDay(new Date(visit.check_in_at)).getTime()),
+  ).size
+}
+
 function demoData() {
   const now = new Date()
   const at = (daysAgo: number, hour: number, minute = 0) => {
@@ -80,95 +98,81 @@ function demoData() {
     d.setHours(hour, minute, 0, 0)
     return d.toISOString()
   }
+  const dateAt = (daysAgo: number) => {
+    const d = new Date(now)
+    d.setDate(d.getDate() - daysAgo)
+    return todayDateKey(d)
+  }
   const members: Member[] = [
-    { id: 'm-yugo', name: 'ゆーご', initials: 'YG', avatar_color: 'teal', avatar_url: null, claimed_by: DEMO_AUTH_ID },
-    { id: 'm-manase', name: 'まなせ', initials: 'MN', avatar_color: 'pink', avatar_url: null, claimed_by: 'other-1' },
-    { id: 'm-icchi', name: 'いっちー', initials: 'IC', avatar_color: 'green', avatar_url: null, claimed_by: 'other-2' },
-    { id: 'm-ukasu', name: 'うーかす', initials: 'UK', avatar_color: 'orange', avatar_url: null, claimed_by: 'other-3' },
+    {
+      id: DEMO_AUTH_ID,
+      user_id: DEMO_AUTH_ID,
+      email: 'demo@example.com',
+      name: 'ゆーご',
+      initials: 'YG',
+      avatar_color: 'teal',
+      avatar_url: null,
+    },
+    { id: 'demo-2', user_id: 'other-2', email: null, name: 'まなせ', initials: 'MN', avatar_color: 'pink', avatar_url: null },
+    { id: 'demo-3', user_id: 'other-3', email: null, name: 'いっちー', initials: 'IC', avatar_color: 'green', avatar_url: null },
+    { id: 'demo-4', user_id: 'other-4', email: null, name: 'うーかす', initials: 'UK', avatar_color: 'orange', avatar_url: null },
+  ]
+  const dailyIntents: DailyIntent[] = [
+    { id: 'di-1', member_id: DEMO_AUTH_ID, date: dateAt(0), status: 'going' },
+    { id: 'di-2', member_id: 'demo-3', date: dateAt(0), status: 'going' },
+    { id: 'di-3', member_id: 'demo-4', date: dateAt(0), status: 'not_going' },
   ]
   const gymVisits: GymVisit[] = [
-    { id: 'v-open', member_id: 'm-manase', check_in_at: at(0, Math.max(0, now.getHours() - 1)), check_out_at: null },
-    { id: 'v-done', member_id: 'm-ukasu', check_in_at: at(0, 7), check_out_at: at(0, 8, 30) },
-    ...[1, 2, 4, 6, 9, 12, 16, 20].map((d, i) => ({
-      id: `vh-${i}`,
-      member_id: 'm-yugo',
-      check_in_at: at(d, 19),
-      check_out_at: at(d, 20, 15),
+    { id: 'v-open', member_id: 'demo-2', check_in_at: at(0, Math.max(0, now.getHours() - 1)), check_out_at: null },
+    { id: 'v-done', member_id: 'demo-4', check_in_at: at(0, 7), check_out_at: at(0, 8, 30) },
+    ...[1, 2, 4, 6, 9, 12, 16, 20].map((day, index) => ({
+      id: `v-me-${index}`,
+      member_id: DEMO_AUTH_ID,
+      check_in_at: at(day, 19),
+      check_out_at: at(day, 20),
     })),
-    ...[1, 3, 5].map((d, i) => ({
-      id: `vm-${i}`,
-      member_id: 'm-manase',
-      check_in_at: at(d, 18),
-      check_out_at: at(d, 19),
+    ...[1, 3, 5, 8].map((day, index) => ({
+      id: `v-mn-${index}`,
+      member_id: 'demo-2',
+      check_in_at: at(day, 18),
+      check_out_at: at(day, 19),
     })),
   ]
-  const attendanceRecords: AttendanceRecord[] = [
-    { id: 'a-1', member_id: 'm-yugo', date: now.toISOString(), type: 'going' },
-    { id: 'a-2', member_id: 'm-icchi', date: now.toISOString(), type: 'going' },
-    { id: 'a-3', member_id: 'm-ukasu', date: now.toISOString(), type: 'notGoing' },
-  ]
-  const notifications: AppNotification[] = [
-    {
-      id: 'n-1',
-      recipient_member_id: 'm-yugo',
-      actor_member_id: 'm-manase',
-      type: 'checkedIn',
-      title: 'チェックインがありました',
-      message: 'まなせ さんがジムに到着しました。',
-      created_at: at(0, Math.max(0, now.getHours() - 1)),
-      read_at: null,
-    },
-    {
-      id: 'n-2',
-      recipient_member_id: 'm-yugo',
-      actor_member_id: 'm-icchi',
-      type: 'going',
-      title: '参加予定が更新されました',
-      message: 'いっちー さんが「参加」を選びました。',
-      created_at: at(0, 9),
-      read_at: null,
-    },
-  ]
-  return { members, gymVisits, attendanceRecords, notifications }
+  return { members, dailyIntents, gymVisits }
 }
 
 interface GymStoreValue {
   appMode: AppMode
   session: Session | null
   members: Member[]
-  claimableMembers: Member[]
-  attendanceRecords: AttendanceRecord[]
+  dailyIntents: DailyIntent[]
   gymVisits: GymVisit[]
-  notifications: AppNotification[]
   lastErrorMessage: string | null
   currentUser: Member | null
   isCurrentUserGoing: boolean
   isCurrentUserNotGoing: boolean
   isCurrentUserCheckedIn: boolean
-  unreadNotificationCount: number
   todayStatus: (memberId: string) => TodayGymStatus | null
   todayCheckedInMembers: Member[]
   todayCheckedOutMembers: Member[]
   todayGoingNotArrivedMembers: Member[]
   todayNotGoingMembers: Member[]
-  currentStreak: number
+  todayUnknownMembers: Member[]
   currentUserMonthCount: number
-  currentUserMonthMinutes: number
-  dailyStatsForWeek: (date?: Date, memberId?: string) => PeriodStat[]
-  monthlyStats: (monthsBack?: number, memberId?: string) => PeriodStat[]
-  memberComparisonForWeek: (date?: Date) => MemberComparisonEntry[]
-  memberComparisonForMonth: (date?: Date) => MemberComparisonEntry[]
-  signInWithEmail: (email: string) => Promise<{ error: string | null }>
-  claimMember: (memberId: string) => Promise<{ error: string | null }>
+  currentUserTotalCount: number
+  currentUserMonthRank: number | null
+  visitStatsForWeek: (date?: Date, memberId?: string) => PeriodStat[]
+  rankingForPeriod: (period: RankingPeriod) => RankingEntry[]
+  signUpWithEmail: (params: { email: string; password: string; name: string }) => Promise<{ error: string | null; needsEmailConfirmation: boolean }>
+  signInWithEmail: (email: string, password: string) => Promise<{ error: string | null }>
+  resetPassword: (email: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
-  toggleGoing: () => Promise<void>
-  toggleNotGoing: () => Promise<void>
+  setTodayIntent: (status: DailyIntentStatus | null) => Promise<void>
   checkIn: () => Promise<void>
   checkOut: () => Promise<void>
   cancelCheckIn: () => Promise<void>
   cancelCheckOut: () => Promise<void>
-  markNotificationsRead: () => Promise<void>
-  updateProfile: (name: string) => Promise<void>
+  updateProfile: (name: string) => Promise<{ error: string | null }>
   updateAvatar: (image: Blob) => Promise<{ error: string | null }>
   reload: () => void
 }
@@ -179,9 +183,8 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
   const [appMode, setAppMode] = useState<AppMode>('loading')
   const [session, setSession] = useState<Session | null>(null)
   const [members, setMembers] = useState<Member[]>([])
-  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([])
+  const [dailyIntents, setDailyIntents] = useState<DailyIntent[]>([])
   const [gymVisits, setGymVisits] = useState<GymVisit[]>([])
-  const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [lastErrorMessage, setLastErrorMessage] = useState<string | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
 
@@ -189,23 +192,47 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
 
   const currentUser = useMemo<Member | null>(() => {
     if (!authUserId) return null
-    return members.find((m) => m.claimed_by === authUserId) ?? null
+    return members.find((member) => member.user_id === authUserId || member.id === authUserId) ?? null
   }, [members, authUserId])
 
   const currentUserId = currentUser?.id ?? null
-  const claimableMembers = useMemo(
-    () => members.filter((member) => member.claimed_by === null || member.claimed_by === authUserId),
-    [members, authUserId],
-  )
 
-  // Bootstrap: restore an existing session if one is already stored locally.
+  const ensureCurrentMember = useCallback(async (user: User): Promise<Member> => {
+    const displayName = String(user.user_metadata.name ?? user.user_metadata.display_name ?? user.email?.split('@')[0] ?? 'member')
+    const fallback: Member = {
+      id: user.id,
+      user_id: user.id,
+      email: user.email ?? null,
+      name: displayName,
+      initials: defaultInitials(displayName, user.email),
+      avatar_color: randomAvatarColor(user.email ?? user.id),
+      avatar_url: null,
+    }
+
+    const { data: existing, error: existingError } = await supabase
+      .from('members')
+      .select('*')
+      .eq('user_id', user.id)
+      .maybeSingle()
+    if (existingError) throw existingError
+    if (existing) return existing as Member
+
+    const { data, error } = await supabase
+      .from('members')
+      .insert(fallback)
+      .select()
+      .single()
+    if (error) throw error
+    return data as Member
+  }, [])
+
   useEffect(() => {
     if (DEMO_MODE) {
       const seed = demoData()
+      setSession(null)
       setMembers(seed.members)
+      setDailyIntents(seed.dailyIntents)
       setGymVisits(seed.gymVisits)
-      setAttendanceRecords(seed.attendanceRecords)
-      setNotifications(seed.notifications)
       setAppMode('signedIn')
       return
     }
@@ -226,40 +253,25 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
           'セッション確認',
         )
         if (cancelled) return
-
-        if (error) {
-          throw error
-        }
-
-        if (data.session) {
-          setSession(data.session)
-          return
-        }
-        setSession(null)
-        setMembers([])
-        setAttendanceRecords([])
-        setGymVisits([])
-        setNotifications([])
-        setLastErrorMessage(null)
-        setAppMode('auth')
-        return
+        if (error) throw error
+        setSession(data.session)
+        setAppMode(data.session ? 'loading' : 'auth')
       } catch (error) {
         if (cancelled) return
-        setLastErrorMessage(`保存済みセッションの復元に失敗したため、再接続します。(${formatErrorMessage(error)})`)
+        setLastErrorMessage(`保存済みセッションの復元に失敗しました。(${formatErrorMessage(error)})`)
+        setAppMode('failed')
       }
-      if (!cancelled) setAppMode('failed')
     }
 
     bootstrap()
 
-    const { data: subscription } = supabase.auth.onAuthStateChange((event, nextSession) => {
+    const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       if (cancelled) return
       setSession(nextSession)
-      if (event === 'SIGNED_OUT' || !nextSession) {
+      if (!nextSession) {
         setMembers([])
-        setAttendanceRecords([])
+        setDailyIntents([])
         setGymVisits([])
-        setNotifications([])
         setLastErrorMessage(null)
         setAppMode('auth')
       }
@@ -272,608 +284,435 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    if (!session) return
+    if (DEMO_MODE || !session) return
     const activeSession = session
     let cancelled = false
 
-    async function run() {
+    async function loadData() {
       setAppMode('loading')
       try {
-        const { data: memberRows, error: membersError } = await withTimeout(
-          Promise.resolve(supabase.from('members').select('*')),
-          INITIAL_LOAD_TIMEOUT_MS,
-          'メンバー一覧の読み込み',
-        )
-        if (membersError) throw membersError
-        if (cancelled) return
-        setMembers(memberRows as Member[])
-
-        const claimed = (memberRows as Member[]).find((m) => m.claimed_by === activeSession.user.id) ?? null
-        if (!claimed) {
-          setAttendanceRecords([])
-          setGymVisits([])
-          setNotifications([])
-          setLastErrorMessage(null)
-          setAppMode('claiming')
-          return
-        }
-
-        const [attendanceRes, visitsRes, notificationsRes] = await withTimeout(
+        await ensureCurrentMember(activeSession.user)
+        const [membersRes, intentsRes, visitsRes] = await withTimeout(
           Promise.all([
-            supabase.from('attendance_records').select('*'),
-            supabase.from('gym_visits').select('*'),
-            supabase
-              .from('notifications')
-              .select('*')
-              .eq('recipient_member_id', claimed.id)
-              .order('created_at', { ascending: false })
-              .limit(100),
+            supabase.from('members').select('*').order('name', { ascending: true }),
+            supabase.from('daily_intents').select('*').order('date', { ascending: false }),
+            supabase.from('gym_visits').select('*').order('check_in_at', { ascending: false }),
           ]),
           INITIAL_LOAD_TIMEOUT_MS,
           '初期データの読み込み',
         )
-        if (attendanceRes.error) throw attendanceRes.error
+        if (membersRes.error) throw membersRes.error
+        if (intentsRes.error) throw intentsRes.error
         if (visitsRes.error) throw visitsRes.error
-        if (notificationsRes.error) throw notificationsRes.error
         if (cancelled) return
-
-        setAttendanceRecords(attendanceRes.data as AttendanceRecord[])
+        setMembers(membersRes.data as Member[])
+        setDailyIntents(intentsRes.data as DailyIntent[])
         setGymVisits(visitsRes.data as GymVisit[])
-        setNotifications(notificationsRes.data as AppNotification[])
         setLastErrorMessage(null)
         setAppMode('signedIn')
       } catch (error) {
-        if (!cancelled) {
-          setLastErrorMessage(error instanceof Error ? error.message : String(error))
-          setAppMode('failed')
-        }
+        if (cancelled) return
+        setLastErrorMessage(formatErrorMessage(error))
+        setAppMode('failed')
       }
     }
 
-    run()
+    loadData()
     return () => {
       cancelled = true
     }
-  }, [session, reloadToken])
+  }, [ensureCurrentMember, reloadToken, session])
 
-  const reload = useCallback(() => setReloadToken((t) => t + 1), [])
+  const reload = useCallback(() => setReloadToken((token) => token + 1), [])
 
-  // refresh when the installed PWA comes back to the foreground (e.g. after a push notification)
   useEffect(() => {
     function handleVisibility() {
       if (document.visibilityState === 'visible' && session) reload()
     }
     document.addEventListener('visibilitychange', handleVisibility)
     return () => document.removeEventListener('visibilitychange', handleVisibility)
-  }, [session, reload])
+  }, [reload, session])
 
   const openVisitFor = useCallback(
-    (memberId: string) => gymVisits.find((v) => v.member_id === memberId && v.check_out_at === null),
+    (memberId: string) => gymVisits.find((visit) => visit.member_id === memberId && visit.check_out_at === null) ?? null,
     [gymVisits],
   )
 
-  const todayAttendanceRecordFor = useCallback(
+  const todayIntentFor = useCallback(
     (memberId: string) =>
-      attendanceRecords
-        .filter((r) => r.member_id === memberId && isDateInToday(new Date(r.date)))
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0] ?? null,
-    [attendanceRecords],
+      dailyIntents
+        .filter((intent) => intent.member_id === memberId && intent.date === todayDateKey())
+        .sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? ''))[0] ?? null,
+    [dailyIntents],
   )
 
   const todayClosedVisitFor = useCallback(
     (memberId: string) =>
       gymVisits
-        .filter((v) => v.member_id === memberId && v.check_out_at !== null && isDateInToday(new Date(v.check_in_at)))
+        .filter((visit) => visit.member_id === memberId && visit.check_out_at !== null && isDateInToday(new Date(visit.check_in_at)))
         .sort((a, b) => new Date(b.check_in_at).getTime() - new Date(a.check_in_at).getTime())[0] ?? null,
     [gymVisits],
   )
 
-  const isCurrentUserGoing = useMemo(
-    () =>
-      Boolean(currentUserId && todayAttendanceRecordFor(currentUserId)?.type === 'going'),
-    [currentUserId, todayAttendanceRecordFor],
-  )
-
-  const isCurrentUserNotGoing = useMemo(
-    () =>
-      Boolean(currentUserId && todayAttendanceRecordFor(currentUserId)?.type === 'notGoing'),
-    [currentUserId, todayAttendanceRecordFor],
-  )
-
-  const isCurrentUserCheckedIn = useMemo(
-    () => Boolean(currentUserId && openVisitFor(currentUserId)),
-    [currentUserId, openVisitFor],
-  )
+  const isCurrentUserGoing = Boolean(currentUserId && todayIntentFor(currentUserId)?.status === 'going')
+  const isCurrentUserNotGoing = Boolean(currentUserId && todayIntentFor(currentUserId)?.status === 'not_going')
+  const isCurrentUserCheckedIn = Boolean(currentUserId && openVisitFor(currentUserId))
 
   const todayStatus = useCallback(
     (memberId: string): TodayGymStatus | null => {
       if (openVisitFor(memberId)) return 'checkedIn'
-      const hasVisitToday = gymVisits.some((v) => v.member_id === memberId && isDateInToday(new Date(v.check_in_at)))
-      if (hasVisitToday) return 'checkedOut'
-      const attendance = todayAttendanceRecordFor(memberId)
-      if (attendance?.type === 'notGoing') return 'notGoing'
-      const isGoingToday = attendance?.type === 'going'
-      if (isGoingToday) return 'goingNotArrived'
+      if (todayClosedVisitFor(memberId)) return 'checkedOut'
+      const intent = todayIntentFor(memberId)
+      if (intent?.status === 'not_going') return 'notGoing'
+      if (intent?.status === 'going') return 'goingNotArrived'
       return null
     },
-    [gymVisits, openVisitFor, todayAttendanceRecordFor],
+    [openVisitFor, todayClosedVisitFor, todayIntentFor],
   )
 
   const todayCheckedInMembers = useMemo(
-    () => members.filter((m) => todayStatus(m.id) === 'checkedIn'),
+    () => members.filter((member) => todayStatus(member.id) === 'checkedIn'),
     [members, todayStatus],
   )
   const todayCheckedOutMembers = useMemo(
-    () => members.filter((m) => todayStatus(m.id) === 'checkedOut'),
+    () => members.filter((member) => todayStatus(member.id) === 'checkedOut'),
     [members, todayStatus],
   )
   const todayGoingNotArrivedMembers = useMemo(
-    () => members.filter((m) => todayStatus(m.id) === 'goingNotArrived'),
+    () => members.filter((member) => todayStatus(member.id) === 'goingNotArrived'),
     [members, todayStatus],
   )
   const todayNotGoingMembers = useMemo(
-    () => members.filter((m) => todayStatus(m.id) === 'notGoing'),
+    () => members.filter((member) => todayStatus(member.id) === 'notGoing'),
+    [members, todayStatus],
+  )
+  const todayUnknownMembers = useMemo(
+    () => members.filter((member) => todayStatus(member.id) === null),
     [members, todayStatus],
   )
 
-  const currentStreak = useMemo(() => {
-    if (!currentUserId) return 0
-    const days = Array.from(
-      new Set(
-        gymVisits
-          .filter((v) => v.member_id === currentUserId)
-          .map((v) => startOfDay(new Date(v.check_in_at)).getTime()),
-      ),
-    ).sort((a, b) => b - a)
+  const rankingForPeriod = useCallback(
+    (period: RankingPeriod): RankingEntry[] => {
+      const ranked = members
+        .map((member) => ({
+          member,
+          count: countVisitDays(gymVisits, member.id, period),
+          rank: 0,
+          isCurrentUser: member.id === currentUserId,
+        }))
+        .sort((a, b) => b.count - a.count || a.member.name.localeCompare(b.member.name, 'ja'))
 
-    let streak = 0
-    let cursor = startOfDay(new Date()).getTime()
-    const dayMs = 24 * 60 * 60 * 1000
-    for (const day of days) {
-      if (day === cursor) {
-        streak += 1
-        cursor -= dayMs
-      } else {
-        break
-      }
-    }
-    return streak
-  }, [gymVisits, currentUserId])
-
-  const currentUserMonthCount = useMemo(() => {
-    if (!currentUserId) return 0
-    const now = new Date()
-    const days = new Set(
-      gymVisits
-        .filter((v) => v.member_id === currentUserId && isSameMonth(new Date(v.check_in_at), now))
-        .map((v) => startOfDay(new Date(v.check_in_at)).getTime()),
-    )
-    return days.size
-  }, [gymVisits, currentUserId])
-
-  const currentUserMonthMinutes = useMemo(() => {
-    if (!currentUserId) return 0
-    const now = new Date()
-    return gymVisits
-      .filter((v) => v.member_id === currentUserId && isSameMonth(new Date(v.check_in_at), now))
-      .reduce((sum, v) => sum + minutesBetween(new Date(v.check_in_at), v.check_out_at ? new Date(v.check_out_at) : now), 0)
-  }, [gymVisits, currentUserId])
-
-  const unreadNotificationCount = useMemo(
-    () => notifications.filter((n) => n.read_at === null).length,
-    [notifications],
+      let lastCount: number | null = null
+      let lastRank = 0
+      return ranked.map((entry, index) => {
+        if (entry.count !== lastCount) {
+          lastRank = index + 1
+          lastCount = entry.count
+        }
+        return { ...entry, rank: lastRank }
+      })
+    },
+    [currentUserId, gymVisits, members],
   )
 
-  const dailyStatsForWeek = useCallback(
+  const currentUserMonthCount = currentUserId ? countVisitDays(gymVisits, currentUserId, 'month') : 0
+  const currentUserTotalCount = currentUserId ? countVisitDays(gymVisits, currentUserId, 'all') : 0
+  const currentUserMonthRank = rankingForPeriod('month').find((entry) => entry.isCurrentUser)?.rank ?? null
+
+  const visitStatsForWeek = useCallback(
     (date: Date = new Date(), memberId?: string): PeriodStat[] => {
       const targetId = memberId ?? currentUserId
       const monday = mondayOfWeek(date)
-      return Array.from({ length: 7 }, (_, offset) => {
+      return Array.from({ length: 7 }, (_unused, offset) => {
         const day = addDays(monday, offset)
-        const visits = gymVisits.filter((v) => v.member_id === targetId && isSameDay(new Date(v.check_in_at), day))
-        const minutes = visits.reduce(
-          (sum, v) => sum + minutesBetween(new Date(v.check_in_at), v.check_out_at ? new Date(v.check_out_at) : new Date()),
-          0,
-        )
-        return { label: weekdayLabel(day), start: day, count: visits.length > 0 ? 1 : 0, minutes }
+        const count = targetId
+          ? Number(gymVisits.some((visit) => visit.member_id === targetId && isSameDay(new Date(visit.check_in_at), day)))
+          : 0
+        return { label: weekdayLabel(day), start: day, count }
       })
     },
-    [gymVisits, currentUserId],
+    [currentUserId, gymVisits],
   )
 
-  const monthlyStats = useCallback(
-    (monthsBack = 6, memberId?: string): PeriodStat[] => {
-      const targetId = memberId ?? currentUserId
-      const results: PeriodStat[] = []
-      for (let offset = monthsBack - 1; offset >= 0; offset--) {
-        const monthDate = addMonths(new Date(), -offset)
-        const monthStart = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1)
-        const visits = gymVisits.filter((v) => v.member_id === targetId && isSameMonth(new Date(v.check_in_at), monthDate))
-        const days = new Set(visits.map((v) => startOfDay(new Date(v.check_in_at)).getTime())).size
-        const minutes = visits.reduce(
-          (sum, v) => sum + minutesBetween(new Date(v.check_in_at), v.check_out_at ? new Date(v.check_out_at) : new Date()),
-          0,
-        )
-        results.push({ label: monthLabel(monthStart), start: monthStart, count: days, minutes })
-      }
-      return results
-    },
-    [gymVisits, currentUserId],
-  )
+  const signUpWithEmail = useCallback(async ({ email, password, name }: { email: string; password: string; name: string }) => {
+    const normalizedEmail = email.trim()
+    const normalizedName = name.trim()
+    if (!normalizedName) return { error: '表示名を入力してください。', needsEmailConfirmation: false }
+    if (!normalizedEmail) return { error: 'メールアドレスを入力してください。', needsEmailConfirmation: false }
+    if (password.length < 6) return { error: 'パスワードは6文字以上で入力してください。', needsEmailConfirmation: false }
 
-  const memberComparisonForWeek = useCallback(
-    (date: Date = new Date()): MemberComparisonEntry[] => {
-      const monday = mondayOfWeek(date)
-      const weekEnd = addDays(monday, 7)
-      return members
-        .map((member) => {
-          const visits = gymVisits.filter(
-            (v) => v.member_id === member.id && new Date(v.check_in_at) >= monday && new Date(v.check_in_at) < weekEnd,
-          )
-          const days = new Set(visits.map((v) => startOfDay(new Date(v.check_in_at)).getTime())).size
-          const minutes = visits.reduce(
-            (sum, v) => sum + minutesBetween(new Date(v.check_in_at), v.check_out_at ? new Date(v.check_out_at) : new Date()),
-            0,
-          )
-          return { member, count: days, minutes }
-        })
-        .sort((a, b) => b.minutes - a.minutes)
-    },
-    [members, gymVisits],
-  )
-
-  const memberComparisonForMonth = useCallback(
-    (date: Date = new Date()): MemberComparisonEntry[] => {
-      return members
-        .map((member) => {
-          const visits = gymVisits.filter((v) => v.member_id === member.id && isSameMonth(new Date(v.check_in_at), date))
-          const days = new Set(visits.map((v) => startOfDay(new Date(v.check_in_at)).getTime())).size
-          const minutes = visits.reduce(
-            (sum, v) => sum + minutesBetween(new Date(v.check_in_at), v.check_out_at ? new Date(v.check_out_at) : new Date()),
-            0,
-          )
-          return { member, count: days, minutes }
-        })
-        .sort((a, b) => b.minutes - a.minutes)
-    },
-    [members, gymVisits],
-  )
-
-  const notificationRecipientIds = useCallback(
-    () => members.map((m) => m.id).filter((id) => id !== currentUserId),
-    [members, currentUserId],
-  )
-
-  const createNotifications = useCallback(
-    async (type: AppNotificationType, title: string, message: string) => {
-      if (isGymClosed(new Date())) return
-      if (DEMO_MODE) return
-      const recipients = notificationRecipientIds()
-      if (recipients.length === 0 || !currentUserId) return
-      const payload: AppNotification[] = recipients.map((recipientId) => ({
-        id: crypto.randomUUID(),
-        recipient_member_id: recipientId,
-        actor_member_id: currentUserId,
-        type,
-        title,
-        message,
-        created_at: new Date().toISOString(),
-        read_at: null,
-      }))
-      const { error } = await supabase.from('notifications').insert(payload)
-      if (error) setLastErrorMessage(error.message)
-    },
-    [notificationRecipientIds, currentUserId],
-  )
-
-  const signInWithEmail = useCallback(async (email: string) => {
-    const normalized = email.trim()
-    if (!normalized) return { error: 'メールアドレスを入力してください。' }
-    const { error } = await supabase.auth.signInWithOtp({
-      email: normalized,
+    const { data, error } = await supabase.auth.signUp({
+      email: normalizedEmail,
+      password,
       options: {
-        emailRedirectTo: authRedirectUrl(),
+        data: {
+          name: normalizedName,
+          avatar_color: randomAvatarColor(normalizedEmail),
+        },
       },
+    })
+    if (error) return { error: error.message, needsEmailConfirmation: false }
+    if (data.session) {
+      setSession(data.session)
+      reload()
+    }
+    return { error: null, needsEmailConfirmation: !data.session }
+  }, [reload])
+
+  const signInWithEmail = useCallback(async (email: string, password: string) => {
+    const normalizedEmail = email.trim()
+    if (!normalizedEmail || !password) return { error: 'メールアドレスとパスワードを入力してください。' }
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: normalizedEmail,
+      password,
+    })
+    if (error) return { error: error.message }
+    setSession(data.session)
+    reload()
+    return { error: null }
+  }, [reload])
+
+  const resetPassword = useCallback(async (email: string) => {
+    const normalizedEmail = email.trim()
+    if (!normalizedEmail) return { error: 'メールアドレスを入力してください。' }
+    const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+      redirectTo: window.location.origin + import.meta.env.BASE_URL,
     })
     if (error) return { error: error.message }
     return { error: null }
   }, [])
 
-  const claimMember = useCallback(
-    async (memberId: string) => {
-      if (!session) return { error: 'ログイン状態を確認できません。もう一度メールリンクから入り直してください。' }
-      const { data, error } = await supabase
-        .from('members')
-        .update({ claimed_by: session.user.id })
-        .eq('id', memberId)
-        .is('claimed_by', null)
-        .select()
-        .maybeSingle()
-      if (error) return { error: error.message }
-      if (!data) return { error: 'その名前はすでに使われています。一覧を更新してみてください。' }
-      reload()
-      return { error: null }
-    },
-    [session, reload],
-  )
-
   const signOut = useCallback(async () => {
-    if (!DEMO_MODE) {
-      await supabase.auth.signOut({ scope: 'local' })
-    }
+    if (!DEMO_MODE) await supabase.auth.signOut({ scope: 'local' })
     setSession(null)
     setMembers([])
-    setAttendanceRecords([])
+    setDailyIntents([])
     setGymVisits([])
-    setNotifications([])
     setLastErrorMessage(null)
     setAppMode('auth')
   }, [])
 
-  // All write actions below update local state first so taps feel instant,
-  // then sync to Supabase in the background and roll back on failure.
-  const toggleGoing = useCallback(async () => {
-    if (!currentUserId || isCurrentUserCheckedIn) return
-    const existing = attendanceRecords.filter(
-      (r) => r.member_id === currentUserId && isDateInToday(new Date(r.date)),
-    )
-    const removedIds = new Set(existing.map((r) => r.id))
+  const setTodayIntent = useCallback(
+    async (status: DailyIntentStatus | null) => {
+      if (!currentUserId) return
+      const existing = todayIntentFor(currentUserId)
+      const date = todayDateKey()
 
-    if (isCurrentUserGoing) {
-      setAttendanceRecords((prev) => prev.filter((r) => !removedIds.has(r.id)))
-      if (!DEMO_MODE && existing.length > 0) {
-        const { error } = await supabase.from('attendance_records').delete().in('id', [...removedIds])
+      if (status === null) {
+        if (!existing) return
+        setDailyIntents((prev) => prev.filter((intent) => intent.id !== existing.id))
+        if (DEMO_MODE) return
+        const { error } = await supabase.from('daily_intents').delete().eq('id', existing.id)
         if (error) {
-          setAttendanceRecords((prev) => [...prev, ...existing])
+          setDailyIntents((prev) => [...prev, existing])
           setLastErrorMessage(error.message)
         }
+        return
       }
-      return
-    }
 
-    const record: AttendanceRecord = {
-      id: crypto.randomUUID(),
-      member_id: currentUserId,
-      date: new Date().toISOString(),
-      type: 'going',
-    }
-    setAttendanceRecords((prev) => [...prev.filter((r) => !removedIds.has(r.id)), record])
-    if (DEMO_MODE) return
-    if (existing.length > 0) {
-      await supabase.from('attendance_records').delete().in('id', [...removedIds])
-    }
-    const { error } = await supabase.from('attendance_records').insert(record)
-    if (error) {
-      setAttendanceRecords((prev) => [...prev.filter((r) => r.id !== record.id), ...existing])
-      setLastErrorMessage(error.message)
-      return
-    }
-    const name = currentUser?.name ?? '誰か'
-    await createNotifications('going', '参加予定が更新されました', `${name} さんが「参加」を選びました。`)
-  }, [currentUserId, isCurrentUserCheckedIn, isCurrentUserGoing, attendanceRecords, currentUser, createNotifications])
-
-  const toggleNotGoing = useCallback(async () => {
-    if (!currentUserId) return
-    if (isCurrentUserCheckedIn) {
-      setLastErrorMessage('チェックインを取り消してから不参加に変更してください。')
-      return
-    }
-    const existing = attendanceRecords.filter(
-      (r) => r.member_id === currentUserId && isDateInToday(new Date(r.date)),
-    )
-    const removedIds = new Set(existing.map((r) => r.id))
-
-    if (isCurrentUserNotGoing) {
-      setAttendanceRecords((prev) => prev.filter((r) => !removedIds.has(r.id)))
-      if (!DEMO_MODE && existing.length > 0) {
-        const { error } = await supabase.from('attendance_records').delete().in('id', [...removedIds])
-        if (error) {
-          setAttendanceRecords((prev) => [...prev, ...existing])
-          setLastErrorMessage(error.message)
-        }
+      const intent: DailyIntent = {
+        id: existing?.id ?? crypto.randomUUID(),
+        member_id: currentUserId,
+        date,
+        status,
+        updated_at: new Date().toISOString(),
       }
-      return
-    }
-
-    const record: AttendanceRecord = {
-      id: crypto.randomUUID(),
-      member_id: currentUserId,
-      date: new Date().toISOString(),
-      type: 'notGoing',
-    }
-    setAttendanceRecords((prev) => [...prev.filter((r) => !removedIds.has(r.id)), record])
-    if (DEMO_MODE) return
-    if (existing.length > 0) {
-      await supabase.from('attendance_records').delete().in('id', [...removedIds])
-    }
-    const { error } = await supabase.from('attendance_records').insert(record)
-    if (error) {
-      setAttendanceRecords((prev) => [...prev.filter((r) => r.id !== record.id), ...existing])
-      setLastErrorMessage(error.message)
-      return
-    }
-    const name = currentUser?.name ?? '誰か'
-    await createNotifications('notGoing', '参加予定が更新されました', `${name} さんが「不参加」を選びました。`)
-  }, [currentUserId, isCurrentUserCheckedIn, isCurrentUserNotGoing, attendanceRecords, currentUser, createNotifications])
+      setDailyIntents((prev) => [...prev.filter((item) => !(item.member_id === currentUserId && item.date === date)), intent])
+      if (DEMO_MODE) return
+      const { error } = await supabase
+        .from('daily_intents')
+        .upsert(intent, { onConflict: 'member_id,date' })
+      if (error) {
+        setDailyIntents((prev) => {
+          const withoutNew = prev.filter((item) => item.id !== intent.id)
+          return existing ? [...withoutNew, existing] : withoutNew
+        })
+        setLastErrorMessage(error.message)
+      }
+    },
+    [currentUserId, todayIntentFor],
+  )
 
   const checkIn = useCallback(async () => {
-    if (!currentUserId || isCurrentUserCheckedIn) return
+    if (!currentUserId || openVisitFor(currentUserId)) return
     const visit: GymVisit = {
       id: crypto.randomUUID(),
       member_id: currentUserId,
       check_in_at: new Date().toISOString(),
       check_out_at: null,
     }
-    setGymVisits((prev) => [...prev, visit])
+    setGymVisits((prev) => [visit, ...prev])
     if (DEMO_MODE) return
     const { error } = await supabase.from('gym_visits').insert(visit)
     if (error) {
-      setGymVisits((prev) => prev.filter((v) => v.id !== visit.id))
+      setGymVisits((prev) => prev.filter((item) => item.id !== visit.id))
       setLastErrorMessage(error.message)
-      return
     }
-    const name = currentUser?.name ?? '誰か'
-    await createNotifications('checkedIn', 'チェックインがありました', `${name} さんがジムに到着しました。`)
-  }, [currentUserId, isCurrentUserCheckedIn, currentUser, createNotifications])
+  }, [currentUserId, openVisitFor])
 
   const checkOut = useCallback(async () => {
     if (!currentUserId) return
     const visit = openVisitFor(currentUserId)
     if (!visit) return
     const checkOutAt = new Date().toISOString()
-    setGymVisits((prev) => prev.map((v) => (v.id === visit.id ? { ...v, check_out_at: checkOutAt } : v)))
+    setGymVisits((prev) => prev.map((item) => (item.id === visit.id ? { ...item, check_out_at: checkOutAt } : item)))
     if (DEMO_MODE) return
     const { error } = await supabase.from('gym_visits').update({ check_out_at: checkOutAt }).eq('id', visit.id)
     if (error) {
-      setGymVisits((prev) => prev.map((v) => (v.id === visit.id ? { ...v, check_out_at: null } : v)))
+      setGymVisits((prev) => prev.map((item) => (item.id === visit.id ? { ...item, check_out_at: null } : item)))
       setLastErrorMessage(error.message)
-      return
     }
-    const name = currentUser?.name ?? '誰か'
-    await createNotifications('checkedOut', 'チェックアウトがありました', `${name} さんがジムを退出しました。`)
-  }, [currentUserId, openVisitFor, currentUser, createNotifications])
+  }, [currentUserId, openVisitFor])
 
   const cancelCheckIn = useCallback(async () => {
     if (!currentUserId) return
     const visit = openVisitFor(currentUserId)
     if (!visit) return
-    setGymVisits((prev) => prev.filter((v) => v.id !== visit.id))
+    setGymVisits((prev) => prev.filter((item) => item.id !== visit.id))
     if (DEMO_MODE) return
     const { error } = await supabase.from('gym_visits').delete().eq('id', visit.id)
     if (error) {
-      setGymVisits((prev) => [...prev, visit])
+      setGymVisits((prev) => [visit, ...prev])
       setLastErrorMessage(error.message)
-      return
     }
-    const name = currentUser?.name ?? '誰か'
-    await createNotifications('checkInCancelled', 'チェックインが取り消されました', `${name} さんがチェックインを取り消しました。`)
-  }, [currentUserId, openVisitFor, currentUser, createNotifications])
+  }, [currentUserId, openVisitFor])
 
   const cancelCheckOut = useCallback(async () => {
     if (!currentUserId) return
     const visit = todayClosedVisitFor(currentUserId)
     if (!visit) return
-    setGymVisits((prev) => prev.map((v) => (v.id === visit.id ? { ...v, check_out_at: null } : v)))
+    setGymVisits((prev) => prev.map((item) => (item.id === visit.id ? { ...item, check_out_at: null } : item)))
     if (DEMO_MODE) return
     const { error } = await supabase.from('gym_visits').update({ check_out_at: null }).eq('id', visit.id)
     if (error) {
-      setGymVisits((prev) => prev.map((v) => (v.id === visit.id ? { ...v, check_out_at: visit.check_out_at } : v)))
+      setGymVisits((prev) => prev.map((item) => (item.id === visit.id ? { ...item, check_out_at: visit.check_out_at } : item)))
       setLastErrorMessage(error.message)
     }
   }, [currentUserId, todayClosedVisitFor])
 
-  const markNotificationsRead = useCallback(async () => {
-    const unread = notifications.filter((n) => n.read_at === null)
-    if (unread.length === 0) return
-    const unreadIds = new Set(unread.map((n) => n.id))
-    const readAt = new Date().toISOString()
-    setNotifications((prev) => prev.map((n) => (unreadIds.has(n.id) ? { ...n, read_at: readAt } : n)))
-    if (DEMO_MODE) return
-    const { error } = await supabase.from('notifications').update({ read_at: readAt }).in('id', [...unreadIds])
-    if (error) {
-      setNotifications((prev) => prev.map((n) => (unreadIds.has(n.id) ? { ...n, read_at: null } : n)))
-      setLastErrorMessage(error.message)
-    }
-  }, [notifications])
-
   const updateProfile = useCallback(
     async (name: string) => {
-      if (!currentUserId) return
-      const trimmed = name.trim()
-      if (!trimmed) return
-      if (!DEMO_MODE) {
-        const { error } = await supabase
-          .from('members')
-          .update({ name: trimmed, initials: defaultInitials(trimmed) })
-          .eq('id', currentUserId)
-        if (error) {
-          setLastErrorMessage(error.message)
-          return
-        }
+      if (!currentUser) return { error: 'プロフィールを確認できません。' }
+      const normalizedName = name.trim()
+      if (!normalizedName) return { error: '表示名を入力してください。' }
+      const nextMember = {
+        ...currentUser,
+        name: normalizedName,
+        initials: defaultInitials(normalizedName, currentUser.email),
       }
-      setMembers((prev) =>
-        prev.map((m) => (m.id === currentUserId ? { ...m, name: trimmed, initials: defaultInitials(trimmed) } : m)),
-      )
+      setMembers((prev) => prev.map((member) => (member.id === currentUser.id ? nextMember : member)))
+      if (DEMO_MODE) return { error: null }
+      const { error } = await supabase
+        .from('members')
+        .update({ name: nextMember.name, initials: nextMember.initials })
+        .eq('id', currentUser.id)
+      if (error) {
+        setMembers((prev) => prev.map((member) => (member.id === currentUser.id ? currentUser : member)))
+        setLastErrorMessage(error.message)
+        return { error: error.message }
+      }
+      return { error: null }
     },
-    [currentUserId],
+    [currentUser],
   )
 
   const updateAvatar = useCallback(
-    async (image: Blob): Promise<{ error: string | null }> => {
-      if (!currentUserId) return { error: 'メンバー情報が見つかりません。' }
-
-      if (DEMO_MODE) {
-        const url = URL.createObjectURL(image)
-        setMembers((prev) => prev.map((m) => (m.id === currentUserId ? { ...m, avatar_url: url } : m)))
-        return { error: null }
-      }
-
-      const path = `${currentUserId}.jpg`
-      const { error: uploadError } = await supabase.storage.from('avatars').upload(path, image, {
-        upsert: true,
-        contentType: 'image/jpeg',
-        cacheControl: '3600',
-      })
+    async (image: Blob) => {
+      if (!currentUser) return { error: 'プロフィールを確認できません。' }
+      if (DEMO_MODE) return { error: null }
+      const path = `${currentUser.id}.jpg`
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(path, image, { cacheControl: '3600', contentType: 'image/jpeg', upsert: true })
       if (uploadError) return { error: uploadError.message }
-
-      const { data } = supabase.storage.from('avatars').getPublicUrl(path)
-      // cache-busting query so everyone's browser picks up the new image
-      const url = `${data.publicUrl}?v=${Date.now()}`
-      const { error } = await supabase.from('members').update({ avatar_url: url }).eq('id', currentUserId)
+      const publicUrl = supabase.storage.from('avatars').getPublicUrl(path).data.publicUrl
+      const avatarUrl = `${publicUrl}?v=${Date.now()}`
+      const { error } = await supabase.from('members').update({ avatar_url: avatarUrl }).eq('id', currentUser.id)
       if (error) return { error: error.message }
-
-      setMembers((prev) => prev.map((m) => (m.id === currentUserId ? { ...m, avatar_url: url } : m)))
+      setMembers((prev) => prev.map((member) => (member.id === currentUser.id ? { ...member, avatar_url: avatarUrl } : member)))
       return { error: null }
     },
-    [currentUserId],
+    [currentUser],
   )
 
-  const value: GymStoreValue = {
-    appMode,
-    session,
-    members,
-    claimableMembers,
-    attendanceRecords,
-    gymVisits,
-    notifications,
-    lastErrorMessage,
-    currentUser,
-    isCurrentUserGoing,
-    isCurrentUserNotGoing,
-    isCurrentUserCheckedIn,
-    unreadNotificationCount,
-    todayStatus,
-    todayCheckedInMembers,
-    todayCheckedOutMembers,
-    todayGoingNotArrivedMembers,
-    todayNotGoingMembers,
-    currentStreak,
-    currentUserMonthCount,
-    currentUserMonthMinutes,
-    dailyStatsForWeek,
-    monthlyStats,
-    memberComparisonForWeek,
-    memberComparisonForMonth,
-    signInWithEmail,
-    claimMember,
-    signOut,
-    toggleGoing,
-    toggleNotGoing,
-    checkIn,
-    checkOut,
-    cancelCheckIn,
-    cancelCheckOut,
-    markNotificationsRead,
-    updateProfile,
-    updateAvatar,
-    reload,
-  }
+  const value = useMemo<GymStoreValue>(
+    () => ({
+      appMode,
+      session,
+      members,
+      dailyIntents,
+      gymVisits,
+      lastErrorMessage,
+      currentUser,
+      isCurrentUserGoing,
+      isCurrentUserNotGoing,
+      isCurrentUserCheckedIn,
+      todayStatus,
+      todayCheckedInMembers,
+      todayCheckedOutMembers,
+      todayGoingNotArrivedMembers,
+      todayNotGoingMembers,
+      todayUnknownMembers,
+      currentUserMonthCount,
+      currentUserTotalCount,
+      currentUserMonthRank,
+      visitStatsForWeek,
+      rankingForPeriod,
+      signUpWithEmail,
+      signInWithEmail,
+      resetPassword,
+      signOut,
+      setTodayIntent,
+      checkIn,
+      checkOut,
+      cancelCheckIn,
+      cancelCheckOut,
+      updateProfile,
+      updateAvatar,
+      reload,
+    }),
+    [
+      appMode,
+      session,
+      members,
+      dailyIntents,
+      gymVisits,
+      lastErrorMessage,
+      currentUser,
+      isCurrentUserGoing,
+      isCurrentUserNotGoing,
+      isCurrentUserCheckedIn,
+      todayStatus,
+      todayCheckedInMembers,
+      todayCheckedOutMembers,
+      todayGoingNotArrivedMembers,
+      todayNotGoingMembers,
+      todayUnknownMembers,
+      currentUserMonthCount,
+      currentUserTotalCount,
+      currentUserMonthRank,
+      visitStatsForWeek,
+      rankingForPeriod,
+      signUpWithEmail,
+      signInWithEmail,
+      resetPassword,
+      signOut,
+      setTodayIntent,
+      checkIn,
+      checkOut,
+      cancelCheckIn,
+      cancelCheckOut,
+      updateProfile,
+      updateAvatar,
+      reload,
+    ],
+  )
 
   return <GymStoreContext.Provider value={value}>{children}</GymStoreContext.Provider>
 }
 
-export function useGymStore(): GymStoreValue {
-  const ctx = useContext(GymStoreContext)
-  if (!ctx) throw new Error('useGymStore must be used within GymStoreProvider')
-  return ctx
+export function useGymStore() {
+  const value = useContext(GymStoreContext)
+  if (!value) throw new Error('useGymStore must be used within GymStoreProvider')
+  return value
 }

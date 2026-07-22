@@ -2,65 +2,50 @@ import { useMemo, useState } from 'react'
 import { useGymStore } from '../store/GymStoreContext'
 import { Card } from '../components/Card'
 import { Avatar } from '../components/Avatar'
-import { formatMinutes } from '../lib/date'
+import type { RankingPeriod } from '../types'
 
-type Period = 'week' | 'month'
+const PERIOD_LABEL: Record<RankingPeriod, string> = {
+  week: '今週',
+  month: '今月',
+  all: '通算',
+}
 
 export function RecordPage() {
   const store = useGymStore()
-  const [period, setPeriod] = useState<Period>('week')
+  const [period, setPeriod] = useState<RankingPeriod>('month')
 
-  const stats = useMemo(
-    () => (period === 'week' ? store.dailyStatsForWeek() : store.monthlyStats(6)),
-    [period, store],
-  )
-
-  const comparison = useMemo(
-    () => (period === 'week' ? store.memberComparisonForWeek() : store.memberComparisonForMonth()),
-    [period, store],
-  )
-
-  const totalMinutes = stats.reduce((sum, s) => sum + s.minutes, 0)
-  const totalCount = stats.reduce((sum, s) => sum + s.count, 0)
-  const maxMinutes = Math.max(1, ...stats.map((s) => s.minutes))
-  const hasComparisonData = comparison.some((c) => c.minutes > 0 || c.count > 0)
+  const weekStats = useMemo(() => store.visitStatsForWeek(), [store])
+  const ranking = useMemo(() => store.rankingForPeriod(period), [period, store])
+  const totalCount = weekStats.reduce((sum, stat) => sum + stat.count, 0)
+  const maxCount = Math.max(1, ...weekStats.map((stat) => stat.count))
+  const hasRankingData = ranking.some((entry) => entry.count > 0)
 
   return (
     <div className="page">
       <header>
-        <div className="eyebrow">RECORD</div>
-        <h1>記録</h1>
-        <p className="muted">ジムにいた時間と回数を振り返れます。</p>
+        <div className="eyebrow">RANKING</div>
+        <h1>ランキング</h1>
+        <p className="muted">ジムに行った回数だけで比べます。滞在時間は集計していません。</p>
       </header>
 
-      <div className="segmented-control">
-        <div className={`segmented-thumb${period === 'month' ? ' right' : ''}`} />
-        <button className={period === 'week' ? 'active' : ''} onClick={() => setPeriod('week')}>
-          週間
-        </button>
-        <button className={period === 'month' ? 'active' : ''} onClick={() => setPeriod('month')}>
-          月間
-        </button>
-      </div>
-
-      <Card title={period === 'week' ? 'THIS WEEK' : 'LAST 6 MONTHS'}>
+      <Card title="THIS WEEK">
         <div className="stat-row">
           <div>
-            <div className="muted small">滞在時間</div>
-            <div className="stat-value">{formatMinutes(totalMinutes)}</div>
-          </div>
-          <div>
-            <div className="muted small">回数</div>
+            <div className="muted small">あなたの今週</div>
             <div className="stat-value accent">{totalCount}回</div>
           </div>
+          <div>
+            <div className="muted small">今月</div>
+            <div className="stat-value">{store.currentUserMonthCount}回</div>
+          </div>
         </div>
-        <div className="bar-chart" key={period}>
-          {stats.map((stat, index) => (
+        <div className="bar-chart" key={totalCount}>
+          {weekStats.map((stat, index) => (
             <div key={stat.label} className="bar-chart-column">
               <div
                 className="bar-chart-bar"
                 style={{
-                  height: `${Math.max(4, (stat.minutes / maxMinutes) * 100)}%`,
+                  height: `${Math.max(4, (stat.count / maxCount) * 100)}%`,
                   animationDelay: `${index * 45}ms`,
                 }}
               />
@@ -70,21 +55,29 @@ export function RecordPage() {
         </div>
       </Card>
 
-      <Card title="COMPARISON">
-        <h3 className="section-heading">{period === 'week' ? '今週のメンバー比較' : '今月のメンバー比較'}</h3>
-        {!hasComparisonData ? (
+      <div className="period-tabs">
+        {(['week', 'month', 'all'] as RankingPeriod[]).map((item) => (
+          <button key={item} className={period === item ? 'active' : ''} onClick={() => setPeriod(item)}>
+            {PERIOD_LABEL[item]}
+          </button>
+        ))}
+      </div>
+
+      <Card title="COUNT RANKING">
+        <h3 className="section-heading">{PERIOD_LABEL[period]}の回数ランキング</h3>
+        {!hasRankingData ? (
           <p className="muted">まだ記録がありません。</p>
         ) : (
           <div className="comparison-list" key={period}>
-            {comparison.map((item, index) => (
-              <div key={item.member.id} className="comparison-row">
-                <span className={`rank${index < 3 ? ' top' : ''}`}>{index + 1}</span>
-                <Avatar member={item.member} size={40} />
+            {ranking.map((entry) => (
+              <div key={entry.member.id} className={`comparison-row${entry.isCurrentUser ? ' is-me' : ''}`}>
+                <span className={`rank${entry.rank <= 3 ? ' top' : ''}`}>{entry.rank}</span>
+                <Avatar member={entry.member} size={40} />
                 <div className="comparison-info">
-                  <div>{item.member.id === store.currentUser?.id ? `${item.member.name} (あなた)` : item.member.name}</div>
-                  <div className="muted small">{item.count}回</div>
+                  <div>{entry.isCurrentUser ? `${entry.member.name} (あなた)` : entry.member.name}</div>
+                  <div className="muted small">{PERIOD_LABEL[period]}</div>
                 </div>
-                <span className="badge">{formatMinutes(item.minutes)}</span>
+                <span className="badge">{entry.count}回</span>
               </div>
             ))}
           </div>

@@ -23,20 +23,25 @@ export const AVATAR_COLOR_HEX: Record<AvatarColor, string> = {
 
 export interface Member {
   id: string
+  user_id: string | null
+  email: string | null
   name: string
   initials: string
   avatar_color: AvatarColor
   avatar_url: string | null
-  claimed_by: string | null
+  created_at?: string
+  updated_at?: string
 }
 
-export type AttendanceType = 'going' | 'notGoing'
+export type DailyIntentStatus = 'going' | 'not_going'
 
-export interface AttendanceRecord {
+export interface DailyIntent {
   id: string
   member_id: string
   date: string
-  type: AttendanceType
+  status: DailyIntentStatus
+  created_at?: string
+  updated_at?: string
 }
 
 export interface GymVisit {
@@ -66,17 +71,19 @@ export interface AppNotification {
 
 export type TodayGymStatus = 'checkedIn' | 'checkedOut' | 'goingNotArrived' | 'notGoing'
 
+export type RankingPeriod = 'week' | 'month' | 'all'
+
+export interface RankingEntry {
+  member: Member
+  count: number
+  rank: number
+  isCurrentUser: boolean
+}
+
 export interface PeriodStat {
   label: string
   start: Date
   count: number
-  minutes: number
 }
 
-export interface MemberComparisonEntry {
-  member: Member
-  count: number
-  minutes: number
-}
-
-export type AppMode = 'loading' | 'auth' | 'claiming' | 'signedIn' | 'failed'
+export type AppMode = 'loading' | 'auth' | 'signedIn' | 'failed'
