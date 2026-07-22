@@ -53,6 +53,10 @@ function todayDateKey(date = new Date()): string {
   return `${year}-${month}-${day}`
 }
 
+function authRedirectUrl(): string {
+  return new URL(import.meta.env.BASE_URL, window.location.origin).toString()
+}
+
 function randomAvatarColor(seed: string): AvatarColor {
   const colors: AvatarColor[] = ['blue', 'teal', 'green', 'orange', 'pink', 'indigo', 'purple', 'red', 'yellow']
   const total = Array.from(seed).reduce((sum, char) => sum + char.charCodeAt(0), 0)
@@ -165,6 +169,7 @@ interface GymStoreValue {
   rankingForPeriod: (period: RankingPeriod) => RankingEntry[]
   signUpWithEmail: (params: { email: string; password: string; name: string }) => Promise<{ error: string | null; needsEmailConfirmation: boolean }>
   signInWithEmail: (email: string, password: string) => Promise<{ error: string | null }>
+  resendSignupEmail: (email: string) => Promise<{ error: string | null }>
   resetPassword: (email: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
   setTodayIntent: (status: DailyIntentStatus | null) => Promise<void>
@@ -445,6 +450,7 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
       email: normalizedEmail,
       password,
       options: {
+        emailRedirectTo: authRedirectUrl(),
         data: {
           name: normalizedName,
           avatar_color: randomAvatarColor(normalizedEmail),
@@ -458,6 +464,20 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     }
     return { error: null, needsEmailConfirmation: !data.session }
   }, [reload])
+
+  const resendSignupEmail = useCallback(async (email: string) => {
+    const normalizedEmail = email.trim()
+    if (!normalizedEmail) return { error: 'メールアドレスを入力してください。' }
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: normalizedEmail,
+      options: {
+        emailRedirectTo: authRedirectUrl(),
+      },
+    })
+    if (error) return { error: error.message }
+    return { error: null }
+  }, [])
 
   const signInWithEmail = useCallback(async (email: string, password: string) => {
     const normalizedEmail = email.trim()
@@ -476,7 +496,7 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
     const normalizedEmail = email.trim()
     if (!normalizedEmail) return { error: 'メールアドレスを入力してください。' }
     const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
-      redirectTo: window.location.origin + import.meta.env.BASE_URL,
+      redirectTo: authRedirectUrl(),
     })
     if (error) return { error: error.message }
     return { error: null }
@@ -660,6 +680,7 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
       rankingForPeriod,
       signUpWithEmail,
       signInWithEmail,
+      resendSignupEmail,
       resetPassword,
       signOut,
       setTodayIntent,
@@ -695,6 +716,7 @@ export function GymStoreProvider({ children }: { children: ReactNode }) {
       rankingForPeriod,
       signUpWithEmail,
       signInWithEmail,
+      resendSignupEmail,
       resetPassword,
       signOut,
       setTodayIntent,

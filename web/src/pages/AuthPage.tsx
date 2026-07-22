@@ -11,12 +11,14 @@ export function AuthPage() {
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
+  const [sentSignupEmail, setSentSignupEmail] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setBusy(true)
+    setSentSignupEmail(null)
     setMessage(null)
     setError(null)
 
@@ -32,6 +34,8 @@ export function AuthPage() {
     }
 
     if (mode === 'signUp' && 'needsEmailConfirmation' in result && result.needsEmailConfirmation) {
+      const normalizedEmail = email.trim()
+      setSentSignupEmail(normalizedEmail)
       setMessage('確認メールを送りました。メール内のリンクを開いてからログインしてください。')
       setMode('signIn')
       return
@@ -50,7 +54,21 @@ export function AuthPage() {
       setError(result.error)
       return
     }
-    setMessage('パスワード再設定メールを送りました。')
+    setMessage('登録済みのメールアドレス宛に、パスワード再設定メールを送りました。')
+  }
+
+  async function handleResendSignupEmail() {
+    if (!sentSignupEmail) return
+    setBusy(true)
+    setMessage(null)
+    setError(null)
+    const result = await store.resendSignupEmail(sentSignupEmail)
+    setBusy(false)
+    if (result.error) {
+      setError(result.error)
+      return
+    }
+    setMessage('確認メールを再送しました。')
   }
 
   return (
@@ -105,6 +123,11 @@ export function AuthPage() {
         {mode === 'signIn' && (
           <button type="button" className="text-link" onClick={handleResetPassword} disabled={busy}>
             パスワードを忘れた場合
+          </button>
+        )}
+        {sentSignupEmail && (
+          <button type="button" className="secondary-button" onClick={handleResendSignupEmail} disabled={busy}>
+            確認メールを再送する
           </button>
         )}
         {message && <div className="message-block accent">{message}</div>}
